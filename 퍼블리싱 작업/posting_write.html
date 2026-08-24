@@ -1,0 +1,486 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>K-POP STEEM</title>
+    <meta name="viewport" content="width=device-width, user-scalable=yes, initial-scale=1.0, maximum-scale=3.0, minimum-scale=1.0">
+    <link rel="stylesheet" href="css/reset.css"><!--css 리셋-->
+    <link rel="stylesheet" href="http://fonts.googleapis.com/earlyaccess/notosanskr.css"><!--본고딕폰트스타일(한국어)-->
+    <link href="https://fonts.googleapis.com/css?family=Exo:300,400,500" rel="stylesheet"><!--EXO 폰트-->
+    <link rel="stylesheet" href="http://code.ionicframework.com/ionicons/2.0.1/css/ionicons.min.css"><!--아이콘폰트-->
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.3.1/css/all.css" integrity="sha384-mzrmE5qonljUremFsqc01SB46JvROS7bZs3IO2EmfFsd15uHvIt+Y8vEf7N7fWAU" crossorigin="anonymous"> <!--폰트어썸-->
+    <script src="https://code.jquery.com/jquery-3.3.1.min.js"></script><!--기본라이브러리-->
+
+    <link rel="stylesheet" href="css/slick.css"><!-- 슬라이드  -->
+    <link rel="stylesheet" href="css/jquery.mCustomScrollbar.css"><!-- 스크롤바  -->    
+    <link rel="stylesheet" href="css/dropzone.css"><!-- 이미지 업로드 -->
+    <link href="css/summernote-lite.css" rel="stylesheet"> <!-- 글쓰기 에디터 -->
+    <link rel="stylesheet" href="css/posting_write.css">
+
+</head>
+<body>
+    <div class="panel_left mCustomScrollbar clear" data-mcs-theme="minimal-dark"> <!--왼쪽메인-->
+        <section class="posting_topwrap"> <!--포스팅 내용 -->
+            <div class="diagonal-line"></div> <!--background color 자르기-->
+            <div class="inner">
+                <div class="posting_header clear">
+                   <a href="javascript:history.back();"><i class="ion-ios-arrow-back"></i></a>
+                    <span class="date">2018-07-25 13:23:24</span>
+                </div>
+                <div class="title_wrap">
+                    <h2>트와이스 사나</h2>
+                    <i>사나는 대한민국에서 활동하는 일본 오사카 출신의 가수로, JYP 엔터테인먼트 소속 여성그룹 트와이스의 멤버입니다.</i>
+                </div>
+            </div>
+        </section>
+        <section class="posting_mainwrap">       
+            <div class="inner">
+                <figure class="posting_img">
+                    <h2>
+                        <img src="images/post2.jpg" alt="트와이스 사나">
+                        <img src="images/post2.jpg" alt="트와이스 사나">
+                        <img src="images/post2.jpg" alt="트와이스 사나">
+                    </h2>
+                </figure>
+                <p class="posting_con">오랜만에 글을 쓰네용 트둥이 사진으로 눈호강!!! 또 요즘 추워지니 원스여러분들 <br> 감기조심하세용~ 사나짱 모모짱♥♥♥<br><br>출생: 1996년 12월 29일 (21세), 일본 오사카부 오사카시 <br>키: 163cm<br>본명: Minatozaki Sana<br>국적: 일본</p>
+                <div class="posting_icon">
+                    <ul class="posting_tag clear">
+                        <li>
+                            <a href="#">트와이스</a>
+                        </li>
+                        <li>
+                            <a href="#">서브보컬</a>
+                        </li>
+                    </ul>
+                    <p class="author">작성자 : <i>@eye501</i> <span>Resteem</span></p>
+                    <div class="posting_gift">
+                        <figure>
+                            <img src="images/gift_icon2.png" alt="기프트 아이콘">
+                        </figure>
+                        <b>GIFT<br>총 0명</b>
+                    </div>
+                    <div class="posting_vote">
+                        <figure>
+                            <img src="images/vote_icon.png" alt="보팅 아이콘">
+                        </figure><b>UPVOTE<br>$0</b>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+    <div class="panel_right mCustomScrollbar" data-mcs-theme="minimal-dark"> <!--오른쪽메뉴-->
+        <div id="popup">
+             <div class="popup_wrap">
+                <div class="popup_header clear">
+                    <h1 class="kpop_music">K-POP Music</h1>
+                    <button type="button" class="popup_close">&#10005;</button>
+                </div>
+                <div class="modal_wrap clear">
+                    <div class="left_side">
+                        <div class="left_inner">
+                            <section class="first_step">
+                                <div class="clear">
+                                    <h2>1.음원선택</h2>
+                                    <form action="#">
+                                        <fieldset class="music_search">
+                                            <legend><i class="hidden">search</i></legend>
+                                            <input type="search" class="music_input" placeholder="Search">
+                                            <button type="submit"><span class="hidden">검색하기</span><i class="ion-ios-search" aria-hidden="true"></i></button>
+                                        </fieldset>
+                                    </form>
+                                </div>
+                                <ul class="musiclist_sortby clear">
+                                    <li class="on"><a href="#">NEW</a></li>
+                                    <li><a href="#">Day</a></li>
+                                    <li><a href="#">Weeks</a></li>
+                                    <li><a href="#">Month</a></li>
+                                    <li><a href="#">Free</a></li>
+                                </ul>
+                                <ol class="music_list">
+                                    <li class="clear">
+                                        <b class="rank">1</b>
+                                        <div class="album"><img src="images/music1.jpg" alt="WARNING 앨범"></div>
+                                        <div class="song">
+                                            <strong>싸이렌 (Siren)</strong>
+                                            <b>선미<span>Warning</span></b>
+                                        </div>
+                                        <i class="far fa-check-circle"></i>
+                                    </li>
+                                    <li class="clear">
+                                        <b class="rank">2</b>
+                                        <div class="album"><img src="images/music2.jpg" alt="TRAVEL:NOAH 앨범"></div>
+                                        <div class="song">
+                                            <strong>NOAH (Feat.박재범, Hoody)</strong>
+                                            <b>HAON (김하온)<span>TRAVEL:NOAH</span></b>
+                                        </div>
+                                        <i class="far fa-check-circle"></i>
+                                    </li>
+                                    <li class="clear">
+                                        <b class="rank">3</b>
+                                        <div class="album"><img src="images/music3.jpg" alt="몰랐니 - The 1st Single 앨범"></div>
+                                        <div class="song">
+                                            <strong>몰랐니 (Lil' Touch)</strong>
+                                            <b>소녀시대-Oh!GG<span>몰랐니 - The 1st Single</span></b>
+                                        </div>
+                                        <i class="far fa-check-circle"></i>
+                                    </li>
+                                    <li class="clear">
+                                        <b class="rank">4</b>
+                                        <div class="album"><img src="images/music4.jpg" alt="LOVE YOURSELF 結 'Answer' 앨범"></div>
+                                        <div class="song">
+                                            <strong>IDOL</strong>
+                                            <b>방탄소년단<span>LOVE YOURSELF 結 'Answer'</span></b>
+                                        </div>
+                                        <i class="far fa-check-circle"></i>
+                                    </li>
+                                    <li class="clear">
+                                        <b class="rank">5</b>
+                                        <div class="album"><img src="images/music5.jpg" alt="Take 앨범"></div>
+                                        <div class="song">
+                                            <strong>Way Back Home</strong>
+                                            <b>숀(SHAUN)<span>Take</span></b>
+                                        </div>
+                                        <i class="far fa-check-circle"></i>
+                                    </li>
+                                    <li class="clear">
+                                        <b class="rank">6</b>
+                                        <div class="album"><img src="images/music6.jpg" alt="RECIPE 앨범"></div>
+                                        <div class="song">
+                                            <strong>열애중</strong>
+                                            <b>벤<span>RECIPE</span></b>
+                                        </div>
+                                        <i class="far fa-check-circle"></i>
+                                    </li>
+                                    <li class="clear">
+                                        <b class="rank">7</b>
+                                        <div class="album"><img src="images/music7.jpg" alt="EVERYD4Y 앨범"></div>
+                                        <div class="song">
+                                            <strong>EVERYD4Y</strong>
+                                            <b>WINNER<span>EVERYD4Y</span></b>
+                                        </div>
+                                        <i class="far fa-check-circle"></i>
+                                    </li>
+                                    <li class="clear">
+                                        <b class="rank">8</b>
+                                        <div class="album"><img src="images/music8.jpg" alt="한(一) 앨범"></div>
+                                        <div class="song">
+                                            <strong>한(一)</strong>
+                                            <b>(여자)아이들<span>한(一)</span></b>
+                                        </div>
+                                        <i class="far fa-check-circle"></i>
+                                    </li>
+                                    <li class="clear">
+                                        <b class="rank">9</b>
+                                        <div class="album"><img src="images/music1.jpg" alt="WARNING 앨범"></div>
+                                        <div class="song">
+                                            <strong>싸이렌 (Siren)</strong>
+                                            <b>선미<span>Warning</span></b>
+                                        </div>
+                                        <i class="far fa-check-circle"></i>
+                                    </li>
+                                    <li class="clear">
+                                        <b class="rank">10</b>
+                                        <div class="album"><img src="images/music2.jpg" alt="TRAVEL:NOAH 앨범"></div>
+                                        <div class="song">
+                                            <strong>NOAH (Feat.박재범, Hoody)</strong>
+                                            <b>HAON (김하온)<span>TRAVEL:NOAH</span></b>
+                                        </div>
+                                        <i class="far fa-check-circle"></i>
+                                    </li>
+                                    <li class="clear">
+                                        <b class="rank">11</b>
+                                        <div class="album"><img src="images/music3.jpg" alt="몰랐니 - The 1st Single 앨범"></div>
+                                        <div class="song">
+                                            <strong>몰랐니 (Lil' Touch)</strong>
+                                            <b>소녀시대-Oh!GG<span>몰랐니 - The 1st Single</span></b>
+                                        </div>
+                                        <i class="far fa-check-circle"></i>
+                                    </li>
+                                    <li class="clear">
+                                        <b class="rank">12</b>
+                                        <div class="album"><img src="images/music7.jpg" alt="EVERYD4Y 앨범"></div>
+                                        <div class="song">
+                                            <strong>EVERYD4Y</strong>
+                                            <b>WINNER<span>EVERYD4Y</span></b>
+                                        </div>
+                                        <i class="far fa-check-circle"></i>
+                                    </li>
+                                </ol>
+                            </section>
+                        </div>
+                    </div>
+                    <div class="right_side">
+                        <div class="right_inner">
+                            <section class="second_step">
+                                <h2>2.결제선택</h2>
+                                <form action="#" target="_blank" class="payment">
+                                    <div class="clear">
+                                       <input type="radio" name="payment" id="payment1" checked>STEEM
+                                        <span class="tooltip">&#63;<i class="tooltiptext">alalalalalala</i></span>
+                                        <b>100.000 <i>STEEM</i></b> 
+                                    </div>   
+                                    <div class="clear">
+                                        <input type="radio" name="payment" id="payment2">STEEM Dollar
+                                        <span class="tooltip">&#63;<i class="tooltiptext">lalalalalal</i></span>
+                                        <b>100.000 <i>SBD</i></b>
+                                    </div>
+                                </form>
+                            </section>
+                            <section class="third_step">
+                                <h2>3.구매하기</h2>
+                                <ul class="buy_list">
+                                    <li>
+                                       <div class="album"><img src="images/music1.jpg" alt="WARNING 앨범"></div>
+                                        <div class="song">
+                                            <strong>싸이렌 (Siren)</strong>
+                                            <b>선미<span>Warning</span></b>
+                                        </div>
+                                        <div class="term_wrap clear">
+                                            <div class="term">
+                                                <select>
+                                                  <option value="term1" selected>1개월</option>
+                                                  <option value="term2">3개월</option>
+                                                  <option value="term3">6개월</option>
+                                                  <option value="term4">12개월</option>
+                                                  <option value="term5">무제한</option>
+                                                </select>
+                                                <strong class="price">1 <i>STEEM</i></strong>
+                                            </div>
+                                            <button type="button" class="term_delet">&#10006;</button>
+                                        </div>
+                                    </li>
+                                    <li>
+                                        <div class="album"><img src="images/music2.jpg" alt="TRAVEL:NOAH 앨범"></div>
+                                        <div class="song">
+                                            <strong>NOAH (Feat.박재범, Hoody)</strong>
+                                            <b>HAON (김하온)<span>TRAVEL:NOAH</span></b>
+                                        </div>
+                                        <div class="term_wrap clear">
+                                            <div class="term">
+                                                <select>
+                                                  <option value="term1">1개월</option>
+                                                  <option value="term2">3개월</option>
+                                                  <option value="term3">6개월</option>
+                                                  <option value="term4" selected>12개월</option>
+                                                  <option value="term5">무제한</option>
+                                                </select>
+                                                <strong class="price">10 <i>STEEM</i></strong>
+                                            </div>
+                                            <button type="button" class="term_delet">&#10006;</button>
+                                        </div>
+                                    </li>
+                                    <li>
+                                        <div class="album"><img src="images/music3.jpg" alt="몰랐니 - The 1st Single 앨범"></div>
+                                        <div class="song">
+                                            <strong>몰랐니 (Lil' Touch)</strong>
+                                            <b>소녀시대-Oh!GG<span>몰랐니 - The 1st Single</span></b>
+                                        </div>
+                                        <div class="term_wrap clear">
+                                            <div class="term">
+                                                <select>
+                                                  <option value="term1">1개월</option>
+                                                  <option value="term2">3개월</option>
+                                                  <option value="term3">6개월</option>
+                                                  <option value="term4">12개월</option>
+                                                  <option value="term5" selected>무제한</option>
+                                                </select>
+                                                <strong class="price">40 <i>STEEM</i></strong>
+                                            </div>
+                                            <button type="button" class="term_delet">&#10006;</button>
+                                        </div>
+                                    </li>
+                                </ul>
+                                <div class="total clear">
+                                    <h3>Total</h3>
+                                    <strong>51.00 <i>STEEM</i></strong>
+                                </div>
+                            </section>
+                            <div class="buy_wrap"><button type="submit" class="buy">구매하기</button></div>
+                            <div class="music_guide">
+                                <b>&#8251; 음원 구매 이용안내</b>
+                                Steemhunt is a ranking community where product enthusiasts (a.k.a. hunters) share/upvote cool new products, discuss them with their deep knowledge, and get rewards for their 
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <header class="header clear">
+            <h1 class="header_logo"><a href="login_after.html"><img src="images/logo2.png" alt="Kpopsteem로고"></a></h1> 
+            <div class="search_wrap">
+                <form action="#">
+                    <fieldset class="search">
+                        <legend><i class="hidden">search</i></legend>
+                        <input type="search" class="input" placeholder="Search">
+                        <button type="submit"><span class="hidden">검색하기</span><i class="ion-ios-search" aria-hidden="true"></i></button>
+                    </fieldset>
+                </form>
+                <div class="keyword">
+                    <i class="ion-chevron-right"></i>
+                    <a href="#">워너원</a>
+                    <a href="#">공항패션</a>
+                    <a href="#">직촬</a>
+                </div>
+            </div>
+           <div class="login_wrap after">
+                <a href="mypage.html" class="mypage">
+                    <img src="images/icon_member.png" alt="마이페이지">
+                    <span class="alert">2</span>
+                </a>
+            </div>
+            <nav class="menu_wrap">
+                <ul class="menu clear">
+                    <li><a href="#">K-POP STEEM?</a></li>
+                    <li><a href="#">지갑</a></li>
+                    <li><a href="#">프로필</a></li>
+                    <li><a href="#">즐겨찾기</a><span class="menu_badge">54</span></li>
+                    <li><a href="#">친구</a><span class="menu_badge">18</span></li>
+                    <li><a href="#">뮤직</a></li>
+                    <li><a href="#">SHOP</a></li>
+                    <li><a href="#">로그아웃</a></li>
+                </ul>
+            </nav>
+        </header>
+        <section>
+            <h2 class="hidden">게시글 작성 폼</h2>
+            <form action="#" id="posting_form">
+                <ul>
+                    <li class="form_title">
+                        <label for="title">제목</label>
+                        <input type="text" name="title" id="title" placeholder="트와이스 사나">
+                    </li>
+                    <li class="form_short">
+                        <label for="short_description">한줄내용</label>
+                        <input type="text" name="short_description" id="short_description" placeholder="사나는 대한민국에서 활동하는 일본 오사카 출신의 가수로, JYP 엔터테인먼트 소속 여성그룹 트와이스의 멤버입니다.">
+                    </li>
+                    <li class="form_upload">
+                        <label for="upload">업로드</label>
+                        <div id="upload-widget"  class="dropzone"></div>
+                    </li>
+                    <li class="form_description">
+                        <label for="description">내용</label>
+                        <textarea name="description" id="summernote" class="mCustomScrollbar" data-mcs-theme="minimal-dark"></textarea>
+                    </li>
+                    <li class="form_tag">
+                        <label for="tag">태그</label>
+                        <input type="text" name="tag" id="tag">
+                    </li>
+                    <li class="form_link">
+                        <label for="link">참조링크</label>
+                        <input type="url" name="link" id="link">
+                        <button type="button" class="link_add">&#10010;</button>
+                    </li>
+                    <li class="form_musicadd">
+                        <label for="musicadd">음악추가 (유료)</label>
+                        <button type="button" id="musicadd">음악검색</button>
+                        <div class="music"></div>
+                    </li>
+                    <li class="form_contributors">
+                        <label for="contributors">수익분배<span class="tooltip">&#63;<i class="tooltiptext">You can add other beneficiaries from your post</i></span></label>
+                        <button type="button" class="contbr_bt">제작자 또는 참여자 추가</button>
+                        <div class="contbr_add_wrap" id="contbr_add_wrap">
+                            <div class="contbr_add clear">
+                               <i>@</i>
+                                <input type="text" name="contributor1" id="contributors">
+                            </div>
+                            <input type="number" name="percent" id="percent" min="5" max="100" step="5" value="20">
+                            <button type="reset" class="delet">&#10006;</button>
+                        </div>
+                    </li>
+                    <li class="guide">
+                        <b>&#8251; 글 작성 이용안내</b>
+                        Steemhunt is a ranking community where product enthusiasts (a.k.a. hunters) share/upvote cool new products, discuss them with their deep knowledge, and get rewards for their 
+                    </li>
+                    <li class="submit">
+                        <button type="submit">작성하기</button>
+                    </li>    
+                </ul>
+            </form>
+        </section>
+    </div>
+	 <script> /*슬라이드*/
+	    $(document).ready(function(){
+            $('.posting_img').each(function() { /*왼쪽 패널 포스팅 메인 이미지 슬라이드*/
+                $(this).children('h2').slick({
+                    infinite: true,
+                    speed: 300,
+                    //autoplay:true,
+                    slidesToShow: 1,
+                    slidesToScroll:1,
+                    dots: true,
+                    arrow:false,
+                    dotsClass:'post-dots',
+                    appendDots:$(this).siblings('.posting_con')
+                });
+            });
+	    });
+    </script>
+    <script> //글쓰기 에디터
+    $(document).ready(function() {
+        $('#summernote').summernote({
+              height: 165, 
+              toolbar: [
+                // [groupName, [list of button]]
+                ['fontsize', ['fontname','fontsize']],
+                ['misc',['undo','redo']], 
+                ['style', ['bold', 'italic', 'underline', 'clear']],
+                ['font', ['strikethrough']],
+              ]
+        });
+    });
+    </script>
+    <script> //이미지 업로드 
+        Dropzone.options.uploadWidget = {
+          paramName: 'file', //업로드 된 파일의 매개변수이름설정
+          //maxFilesize: 2, // MB단위의 최대 파일크기
+          //maxFiles: 1, //최대파일수
+          dictDefaultMessage: '',
+          headers: {
+            'x-csrf-token': document.querySelectorAll('meta[name=csrf-token]')[0].getAttributeNode('content').value,
+          },
+          acceptedFiles: 'image/*', //특정파일형식제한
+          init: function() {
+            this.on('success', function( file, resp ){
+              console.log( file );
+              console.log( resp );
+            });
+            this.on('thumbnail', function(file) { //업로드할수있는이미지크기설정
+              if ( file.width < 640 || file.height < 480 ) {
+                file.rejectDimensions();
+              }
+              else {
+                file.acceptDimensions();
+              }
+            });
+          },
+          accept: function(file, done) {
+            file.acceptDimensions = done;
+            file.rejectDimensions = function() {
+              done('The image must be at least 640 x 480px')
+            };
+          }
+        };
+    </script>
+    <script> //스크롤
+        (function($){
+            $(window).on("load",function(){
+                $(".music_list").mCustomScrollbar({
+                    theme: "minimal-dark",
+                });
+                if(matchMedia("(max-width:600px) , (max-height:800px)").matches){
+                   $(".modal_wrap").mCustomScrollbar({
+                        theme:"minimal-dark",
+                    });
+                };
+            });
+        })(jQuery);
+    </script>
+    <script src="js/dropzone.js"></script><!-- 이미지 업로드 -->
+     <script src="js/summernote-lite.js"></script><script src="js/summernote-ko-KR.js"></script> <!-- 글스기 웹 에디터  -->
+    <script src="js/slick.min.js"></script><!-- 슬라이드  -->
+    <script src="js/custom.js"></script>
+    <script src="js/search.js"></script><!-- 검색하기  -->
+    <script src="js/jquery.mCustomScrollbar.concat.min.js"></script><!-- 스크롤바  --> 
+    
+</body>
+</html>

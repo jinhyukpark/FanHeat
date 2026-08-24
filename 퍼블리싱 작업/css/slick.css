@@ -1,0 +1,333 @@
+/* Slider */
+.slick-slider
+{
+    position: relative;
+
+    display: block;
+    box-sizing: border-box;
+
+    -webkit-user-select: none;
+       -moz-user-select: none;
+        -ms-user-select: none;
+            user-select: none;
+
+    -webkit-touch-callout: none;
+    -khtml-user-select: none;
+    -ms-touch-action: pan-y;
+        touch-action: pan-y;
+    -webkit-tap-highlight-color: transparent;  
+}
+
+.slick-list
+{
+    position: relative;
+
+    display: block;
+    overflow: hidden;
+    /* width: 100%; */
+    margin: 0; 
+    padding: 0;
+}
+.slick-list:focus
+{
+    outline: none; 
+}
+.slick-list.dragging
+{
+    cursor: pointer;
+    cursor: hand; 
+}
+
+.slick-slider .slick-track,
+.slick-slider .slick-list
+{
+    -webkit-transform: translate3d(0, 0, 0);
+       -moz-transform: translate3d(0, 0, 0);
+        -ms-transform: translate3d(0, 0, 0);
+         -o-transform: translate3d(0, 0, 0);
+            transform: translate3d(0, 0, 0); 
+}
+
+.slick-track
+{
+    position: relative;
+    top: 0;
+    left: 0; 
+
+    display: block;
+    margin-left: auto;
+    margin-right: auto;height: 100%;
+}
+.slick-track:before,
+.slick-track:after
+{
+    display: table;
+
+    content: '';
+}
+.slick-track:after
+{
+    clear: both;
+}
+.slick-loading .slick-track
+{
+    visibility: hidden; 
+}
+
+.slick-slide
+{
+    display: none;
+    float: left;
+    margin: 0 auto;
+    /* width: 100% ; */
+    height: 100%;  
+    min-height: 1px;
+}
+
+
+[dir='rtl'] .slick-slide
+{
+    float: right;
+}
+.slick-slide img
+{
+    display: block;
+}
+.slick-slide.slick-loading img
+{
+    display: none; 
+}
+.slick-slide.dragging img
+{
+    pointer-events: none;
+}
+.slick-initialized .slick-slide
+{
+    display: block; 
+}
+.slick-loading .slick-slide
+{
+    visibility: hidden; 
+}
+.slick-vertical .slick-slide
+{
+    display: block; 
+
+    height: auto;
+
+    border: 1px solid transparent;
+}
+.slick-arrow.slick-hidden {
+    display: none; 
+}
+
+
+/*************************** Arrows ****************************/
+
+.ion-ios-arrow-left, .ion-ios-arrow-right{
+    width: 25px;
+    text-align: center;
+    font:4em "Ionicons";
+    height:60px;
+    line-height: 60px;
+    color: #999;
+    opacity: .3;
+    position: absolute;
+    top: 35px;
+    border: 0;
+    cursor: pointer;
+    background: transparent ;
+    outline: 0;
+}
+.ion-ios-arrow-left{
+    left: 5px;
+    transform: translate(-150%,0);
+}
+.ion-ios-arrow-right{
+    right: 0;
+    transform: translate(130%,0);
+}
+
+.ion-ios-arrow-left:hover, .ion-ios-arrow-right:hover{
+    opacity: .7;
+}
+
+/************************** Dots ********************************/
+
+/* Dots */
+
+.post-dots
+{   position: relative;   
+    z-index: 9;
+    top: -90px;
+    display: block;
+
+    width: 100%;
+    padding: 0;
+    margin: 0;
+
+    list-style: none;
+
+    text-align: center;
+}
+.post-dots li
+{
+     position: relative; 
+    z-index: 9;
+    display: inline-block;
+
+    width: 20px;
+    height: 20px;
+    margin: 0 5px;
+    padding: 0;
+
+    cursor: pointer;
+}
+.post-dots li button
+{
+    font-size: 0;
+    line-height: 0;
+
+    display: block;
+
+    width: 20px;
+    height: 20px;
+    padding: 5px;
+
+    cursor: pointer;
+
+    color: transparent;
+    border: 0;
+    outline: none;
+    background: transparent;
+}
+.post-dots li button:hover,
+.post-dots li button:focus
+{
+    outline: none;
+}
+.post-dots li button:hover:before,
+.post-dots li button:focus:before
+{
+    opacity: .65;
+    color: #977fff;
+}
+.post-dots li button:before
+{
+    font-family: 'Ionicons';
+    font-size: 17px;
+    line-height: 20px;
+
+    position: absolute;
+    top: 0;
+    left: 0;
+
+    width: 20px;
+    height: 20px;
+
+    content: '\f21b';
+    text-align: center;
+
+    opacity: .4;
+    color: #999;
+
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+.post-dots li.slick-active button:before
+{
+    opacity: .9;
+    color: #977fff;
+    width:20px;
+}
+} 
+
+
+/* .post_num Dots */
+/* .slick-dotted.slick-slider
+{
+    margin-bottom: 30px;
+}
+ */
+
+.slick-dots
+{
+    top: -100px;position: relative;
+    display: block;
+
+    width: 100%;
+    padding: 0;
+    margin: 0;
+
+    list-style: none;
+
+    text-align: center;z-index: 1;
+}
+.slick-dots li
+{
+    position: relative;z-index: 2;top: -80px;left: -2px;
+    display: inline-block;
+
+    width: 15px;
+    height: 15px;
+    padding: 0;
+
+    cursor: pointer;
+}
+.slick-dots li button
+{
+    font-size: 0;
+    line-height: 0;
+
+    display: block;
+
+    width: 20px;
+    height: 20px;
+    padding: 5px;
+
+    cursor: pointer;
+
+    color: transparent;
+    border: 0;
+    outline: none;
+    background: transparent;
+}
+.slick-dots li button:hover,
+.slick-dots li button:focus
+{
+    outline: none;
+}
+.slick-dots li button:hover:before,
+.slick-dots li button:focus:before
+{
+    opacity: .65;
+    color: #977fff;
+}
+.slick-dots li button:before
+{
+    font-family: 'Ionicons';
+    font-size: 9px;
+    line-height: 20px;
+
+    position: absolute;
+    top: 0;
+    left: 0;
+
+    width: 20px;
+    height: 20px;
+
+    content: '\f21b';
+    text-align: center;
+
+    opacity: .4;
+    color: #999;
+
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+.slick-dots li.slick-active button:before
+{
+    opacity: .9;
+    color: #977fff;
+    width:20px;
+}

@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <title>K-POP STEEM</title>
+    <meta name="viewport" content="width=device-width, user-scalable=yes, initial-scale=1.0, maximum-scale=3.0, minimum-scale=1.0">
+    <link rel="stylesheet" href="css/reset.css"><!--css 리셋-->
+    <link rel="stylesheet" href="http://fonts.googleapis.com/earlyaccess/notosanskr.css"><!--본고딕폰트스타일(한국어)-->
+    <link href="https://fonts.googleapis.com/css?family=Exo:300,400,500" rel="stylesheet"><!--EXO 폰트-->
+    <link rel="stylesheet" href="http://code.ionicframework.com/ionicons/2.0.1/css/ionicons.min.css"><!--아이콘폰트-->
+    <link rel="stylesheet" href="https://use.fontawesome.com/releases/v5.3.1/css/all.css" integrity="sha384-mzrmE5qonljUremFsqc01SB46JvROS7bZs3IO2EmfFsd15uHvIt+Y8vEf7N7fWAU" crossorigin="anonymous"> <!--폰트어썸-->
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet"><!-- controls 아이콘폰트  -->
+    <script src="https://code.jquery.com/jquery-3.3.1.min.js"></script> <!--기본라이브러리-->
+
+    <link rel="stylesheet" href="css/slick.css">
+    <link rel="stylesheet" href="css/jquery.mCustomScrollbar.css">    
+    <link rel="stylesheet" href="css/mypage.css">
+    <style>
+         .postimg_wrap a img { 
+            width: 82px; 
+            height: 82px;
+        } 
+    </style>    
+</head>
+<body>
+    <div class="panel_left mCustomScrollbar clear" data-mcs-theme="minimal-dark"> <!--왼쪽메인-->
+        <div class="mypage_bg_wrap"> <!--포스팅 내용 -->
+            <div class="mypage_bg">
+                <img src="images/mypage_bg.jpg" alt="마이페이지 배경사진">
+                <div class="diagonal-line"></div> <!--background img 사다리꼴 자르기-->
+            </div>
+           <div class="my_profile">
+               <a href="javascript:history.back();"><i class="ion-ios-arrow-back"></i></a>
+               <h2>ttmo68</h2>
+               <span>リュウグウ表面を跳びはねて画像を撮影することにも成功</span>
+               <div class="nation_wrap">
+                   <div class="nation">Japaness</div>
+                   <ul class="sns">
+                       <li><a href="#" class="fab fa-facebook-f"></a></li>
+                       <li><a href="#" class="fab fa-twitter"></a></li>
+                       <li><a href="#" class="fab fa-instagram"></a></li>
+                   </ul>
+               </div>
+           </div>
+        </div>
+        <div class="inner">
+            <section>
+                <div class="play_all clear">
+                    <i class='material-icons'>play_arrow</i>   
+                </div>
+                <div class="my_info_wrap clear">
+                    <div class="myimg_wrap">
+                        <img src="images/mypage.jpg" alt="마이페이지 프로필사진">
+                    </div>
+                    <ul class="my_info clear">
+                        <li>
+                            <b>LEVEL</b> 
+                            <span>10</span>
+                        </li>
+                        <li>
+                            <b>FOLLOWERS</b> 
+                            <span>3,520명</span>
+                        </li>
+                        <li>
+                            <b>FOLLOWING</b> 
+                            <span>1,424명</span>
+                        </li>
+                    </ul>
+                </div>
+                <p class="my_info_detail">
+                    成功　世界初 宇宙航空研究開発機構（ＪＡＸＡ）は２２日、探査機「はやぶさ２」 から分離した小型探査ロボット２台が、小惑星「リュウグウ」に着陸したと発表した。小惑星の上を移動できる探査機が着陸に成功したのは、世界で初めて。(朝日新聞デジタル)成功　世界初 宇宙航空研究開発機構（ＪＡＸＡ）は２２日、探査機「はやぶさ２」 から分離した小型探査ロボット２台が、小惑星「リュウグウ」に着陸したと発表した。小惑星の上を移動できる探査機が着陸に成功したのは、世界で初めて。(朝日新聞デジタル)成功　世界初 宇宙航空研究開発機構（ＪＡＸＡ）は２２日、探査機「はやぶさ２」 から分離した小型探査ロボット２台が、小惑星「リュウグウ」に着陸したと発表した。小惑星の上を移動できる探査機が着陸に成功したのは、世界で初めて。(朝日新聞デジタル)
+                </p>
+            </section>
+            <section class="mymusic_wrap">
+                <div class="clear">
+                    <h3>My뮤직</h3>
+                    <span>Total: <b class="visite_num">24</b></span>
+                </div>
+                <ul class="music_list">
+                    <li class="clear">
+                        <b class="rank">1</b>
+                        <div class="album"><img src="images/music1.jpg" alt="WARNING 앨범"></div>
+                        <div class="song">
+                            <strong>싸이렌 (Siren)</strong>
+                            <b>선미<span>Warning</span></b>
+                        </div>
+                    </li>
+                    <li class="clear">
+                        <b class="rank">2</b>
+                        <div class="album"><img src="images/music2.jpg" alt="TRAVEL:NOAH 앨범"></div>
+                        <div class="song">
+                            <strong>NOAH (Feat.박재범, Hoody)</strong>
+                            <b>HAON (김하온)<span>TRAVEL:NOAH</span></b>
+                        </div>
+                    </li>
+                    <li class="clear">
+                        <b class="rank">3</b>
+                        <div class="album"><img src="images/music3.jpg" alt="몰랐니 - The 1st Single 앨범"></div>
+                        <div class="song">
+                            <strong>몰랐니 (Lil' Touch)</strong>
+                            <b>소녀시대-Oh!GG<span>몰랐니 - The 1st Single</span></b>
+                        </div>
+                    </li>
+                    <li class="clear">
+                        <b class="rank">4</b>
+                        <div class="album"><img src="images/music4.jpg" alt="LOVE YOURSELF 結 'Answer' 앨범"></div>
+                        <div class="song">
+                            <strong>IDOL</strong>
+                            <b>방탄소년단<span>LOVE YOURSELF 結 'Answer'</span></b>
+                        </div>
+                    </li>
+                    <li class="clear">
+                        <b class="rank">5</b>
+                        <div class="album"><img src="images/music5.jpg" alt="Take 앨범"></div>
+                        <div class="song">
+                            <strong>Way Back Home</strong>
+                            <b>숀(SHAUN)<span>Take</span></b>
+                        </div>
+                    </li>
+                </ul>
+            </section>
+        </div>
+        <article class="music_player">
+            <ul class="playlist">
+                <li data-cover="images/haze.png" data-artist="헤이즈(Heize)">
+                    <a href="sample.mp3"><h3>비도 오고 그래서 네 생각이 났어</h3></a>
+                </li>
+                <li data-cover="images/haze.png" data-artist="헤이즈(Heize)">
+                    <a href="sample.mp3">비도 오고 그래서 네 생각이 났어</a>
+                </li>
+            </ul>
+        </article>
+    </div>
+    <div class="panel_right mCustomScrollbar" data-mcs-theme="minimal-dark"> <!--오른쪽메뉴-->
+        <header class="header clear">
+            <h1 class="header_logo"><a href="login_after.html"><img src="images/logo2.png" alt="Kpopsteem로고"></a></h1> 
+            <div class="search_wrap">
+                <form action="#">
+                    <fieldset class="search">
+                        <legend><i class="hidden">search</i></legend>
+                        <input type="search" class="input" placeholder="Search">
+                        <button type="submit"><span class="hidden">검색하기</span><i class="ion-ios-search" aria-hidden="true"></i></button>
+                    </fieldset>
+                </form>
+                <div class="keyword">
+                    <i class="ion-chevron-right"></i>
+                    <a href="#">워너원</a>
+                    <a href="#">공항패션</a>
+                    <a href="#">직촬</a>
+                </div>
+            </div>
+             <div class="login_wrap">
+                <a href="posting_write.html" class="write">글쓰기</a>
+                <a href="mypage.html" class="mypage">
+                    <img src="images/icon_member.png" alt="마이페이지">
+                    <span class="alert">2</span>
+                </a>
+            </div>
+            <nav class="menu_wrap">
+                <ul class="menu clear">
+                    <li><a href="#">K-POP STEEM?</a></li>
+                    <li><a href="#">지갑</a></li>
+                    <li><a href="#">프로필</a></li>
+                    <li><a href="#">즐겨찾기</a><span class="menu_badge">54</span></li>
+                    <li><a href="#">친구</a><span class="menu_badge">18</span></li>
+                    <li><a href="#">뮤직</a></li>
+                    <li><a href="#">SHOP</a></li>
+                    <li><a href="#">로그아웃</a></li>
+                </ul>
+            </nav>
+        </header>
+        <section class="main_con_wrap">
+            <h3 class="hidden">컨텐츠</h3>
+            <div class="main_con_top clear">
+                <span>Total: <b class="visite_num">24</b></span>
+                <form action="#" class="ord_select">
+                    <label for="ord">정렬기준</label>
+                    <select name="ord">
+                        <option value="score">보상점수</option>
+                        <option value="score">보상점수</option>
+                        <option value="score">보상점수</option>
+                  </select>
+                </form>
+            </div>
+            <ul class="main_con">
+                <li class="clear">
+                    <div class="post_num">1
+                    </div>
+                    <div class="postimg_wrap">
+                            <a href="#">
+                                <img src="images/post_list1.jpg" alt="설리 비키니와 딸기">
+                                <img src="images/post_list1.jpg" alt="설리 비키니와 딸기">
+                                <img src="images/post_list1.jpg" alt="설리 비키니와 딸기">
+                            </a>
+                    </div>
+                    <div class="post_wrap">
+                        <strong><a href="#">설리 비키니 + 딸기</a></strong>
+                        <i>Lorem Ipsum is simply dummy text of the printing and typesettin</i>
+                        <div class="post_stats">
+                            <b>$0.74</b>
+                            <i>&#183;</i>
+                            <span>15</span>
+                            <i>&#183;</i>
+                            <span>3</span>
+                        </div>
+                    </div>
+                    <div class="vote_deadline">2018-08-13 14:00:23</div>
+                    <div class="post_vote"><img src="images/vote_icon.png" alt="보팅 아이콘"><b>$0.74</b></div>
+                </li>
+                <li class="clear">
+                    <div class="post_num">2
+                    </div>
+                    <div class="postimg_wrap">
+                        <a href="sub_post.html">
+                        <img src="images/post_list2.jpg" alt="트와이스 사나">
+                        <img src="images/post_list2.jpg" alt="트와이스 사나">
+                        <img src="images/post_list2.jpg" alt="트와이스 사나">  
+                        </a>
+                    </div>
+                    <div class="post_wrap">
+                        <strong><a href="sub_post.html">트와이스 사나</a></strong>
+                        <i>사나 인기가요 출근길 직캠 업뎃 실시간! 오늘도동도오 리즈 갱신</i>
+                        <div class="post_stats">
+                            <b>$0.74</b>
+                            <i>&#183;</i>
+                            <span>15</span>
+                            <i>&#183;</i>
+                            <span>3</span>
+                        </div>
+                    </div>
+                    <div class="vote_deadline">2018-08-13 14:00:23</div>
+                    <div class="post_vote"><img src="images/vote_icon3.png" alt="보팅 아이콘"><b>$0.74</b></div>
+                </li>
+                <li class="clear">
+                    <div class="post_num">3</div>
+                    <div class="postimg_wrap">
+                        <a href="sub_post.html">
+                            <img src="images/post_list3.jpg" alt="레드벨벳 슬기 웬디 - 배틀트립" onload="resize(this)">
+                            <img src="images/post_list3.jpg" alt="레드벨벳 슬기 웬디 - 배틀트립" onload="resize(this)">
+                        </a>
+                    </div>
+                    <div class="post_wrap">
+                        <strong><a href="#">레드벨벳 슬기 웬디 - 배틀트립</a></strong>
+                        <i>Lorem Ipsum is simply dummy text of the printing and typesettin</i>
+                        <div class="post_stats">
+                            <b>$0.74</b>
+                            <i>&#183;</i>
+                            <span>15</span>
+                            <i>&#183;</i>
+                            <span>3</span>
+                        </div>
+                    </div>
+                    <div class="vote_deadline">2018-08-13 14:00:23</div>
+                    <div class="post_vote"><img src="images/vote_icon3.png" alt="보팅 아이콘"><b>$0.74</b></div>
+                </li>
+                <li class="clear">
+                    <div class="post_num">4</div>
+                    <div class="postimg_wrap">
+                        <a href="sub_post.html">
+                            <img src="images/post_list4.jpg" alt="프로듀스48연습생 - 김도아">
+                            <img src="images/post_list4.jpg" alt="프로듀스48연습생 - 김도아">
+                            <img src="images/post_list4.jpg" alt="프로듀스48연습생 - 김도아">
+                        </a>
+                    </div>
+                    <div class="post_wrap">
+                        <strong><a href="#">프로듀스48연습생 - 김도아</a></strong>
+                        <i>Lorem Ipsum is simply dummy text of the printing and typesettin</i>
+                        <div class="post_stats">
+                            <b>$0.74</b>
+                            <i>&#183;</i>
+                            <span>15</span>
+                            <i>&#183;</i>
+                            <span>3</span>
+                        </div>
+                    </div>
+                    <div class="vote_deadline">2018-08-13 14:00:23</div>
+                    <div class="post_vote"><img src="images/vote_icon3.png" alt="보팅 아이콘"><b>$0.74</b></div>
+                </li>
+                <li class="clear">
+                    <div class="post_num">5</div>
+                    <div class="postimg_wrap">
+                       <a href="#"> 
+                           <img src="images/post_list5.jpg" alt="7월 27일 치바 에리이 트위터 사진">
+                           <img src="images/post_list5.jpg" alt="7월 27일 치바 에리이 트위터 사진">
+                           <img src="images/post_list5.jpg" alt="7월 27일 치바 에리이 트위터 사진">
+                        </a>
+                    </div>
+                    <div class="post_wrap">
+                        <strong><a href="#">7월 27일 치바 에리이 트위터 사진</a></strong>
+                        <i>Lorem Ipsum is simply dummy text of the printing and typesettin</i>
+                        <div class="post_stats">
+                            <b>$0.74</b>
+                            <i>&#183;</i>
+                            <span>15</span>
+                            <i>&#183;</i>
+                            <span>3</span>
+                        </div>
+                    </div>
+                    <div class="vote_deadline">2018-08-13 14:00:23</div>
+                    <div class="post_vote"><img src="images/vote_icon3.png" alt="보팅 아이콘"><b>$0.74</b></div>
+                </li>
+                <li class="clear">
+                    <div class="post_num">6</div>
+                    <div class="postimg_wrap">
+                        <a href="#">
+                            <img src="images/post_list6.jpg" alt="하니의 에나멜 의상 뒷태">
+                        </a>
+                    </div>
+                    <div class="post_wrap">
+                        <strong><a href="#">하니의 에나멜 의상 뒷태</a></strong>
+                        <i>Lorem Ipsum is simply dummy text of the printing and typesettin</i>
+                        <div class="post_stats">
+                            <b>$0.74</b>
+                            <i>&#183;</i>
+                            <span>15</span>
+                            <i>&#183;</i>
+                            <span>3</span>
+                        </div>
+                    </div>
+                    <div class="vote_deadline">2018-08-13 14:00:23</div>
+                    <div class="post_vote"><img src="images/vote_icon3.png" alt="보팅 아이콘"><b>$0.74</b></div>
+                </li>
+                <li class="clear">
+                    <div class="post_num">7</div>
+                    <div class="postimg_wrap">
+                        <a href="#">
+                            <img src="images/post_list7.jpg" alt="모모랜드 데이지">
+                            <img src="images/post_list7.jpg" alt="모모랜드 데이지">
+                        </a>
+                    </div>
+                    <div class="post_wrap clear">
+                        <strong><a href="#">모모랜드 데이지</a></strong>
+                        <i>Lorem Ipsum is simply dummy text of the printing and typesettin</i>
+                        <div class="post_stats">
+                            <b>$0.74</b>
+                            <i>&#183;</i>
+                            <span>15</span>
+                            <i>&#183;</i>
+                            <span>3</span>
+                        </div>
+                    </div>
+                    <div class="vote_deadline">2018-08-13 14:00:23</div>
+                    <div class="post_vote"><img src="images/vote_icon3.png" alt="보팅 아이콘"><b>$0.74</b></div>
+                </li>
+            </ul>
+        </section>
+    </div>
+    
+    <script src="js/musicplayer-min.js"></script><!-- 뮤직플레이어  -->
+    <script src="js/slick.min.js"></script><!-- 슬라이드  -->
+    <script src="js/custom.js"></script> 
+    <script src="js/jquery.mCustomScrollbar.concat.min.js"></script><!-- 스크롤  -->
+    
+    <script> /*슬라이드*/
+	    $(document).ready(function(){
+            $('.postimg_wrap').each(function() { /*오른쪽 패널 포스팅 리스트 썸네일 슬라이드*/
+                $(this).children('a').slick({
+                    infinite: true,
+                    speed: 300,
+                    //autoplay:true,
+                    slidesToShow: 1,
+                    slidesToScroll:1,
+                    dots: true,
+                    arrow:false,
+                    dotsClass:'slick-dots',
+                    appendDots:$(this).siblings('.post_num'),
+                    responsive: [{
+                        breakpoint: 1025,
+                        settings: {
+                            dots: false,
+                            autoplay:true,
+                            autoplaySpeed:5000,
+                            identity:true
+                        }
+                    }]
+                });
+            });
+	    });
+    </script>
+    <script> /*뮤직 플레이어 플러그인*/
+        $(".music_player").musicPlayer({
+            //volume: 10,
+            //elements: ['artwork', 'controls', 'progress', 'time', 'volume'],
+            //playerAbovePlaylist: false,
+            onLoad: function() {
+                //Add Audio player
+                plElem = "<div class='pl'><i class='material-icons'>playlist_play</i></div>";
+                $('.music_player').find('.player').append(plElem);
+                // show playlist
+                $('.pl').click(function(e) {
+                    e.preventDefault();
+                    $('.music_player').find('.playlist').toggle();                    
+                });
+            },
+        });
+    </script>
+</body>
+</html>
