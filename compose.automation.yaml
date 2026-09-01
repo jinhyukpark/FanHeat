@@ -30,6 +30,8 @@ services:
       AI_WORKER_URL: http://ai-worker:8090
       N8N_WEBHOOK_URL: http://n8n:5678/webhook/fanheat-full-pipeline
       N8N_X_WEBHOOK_URL: http://n8n:5678/webhook/fanheat-x-pipeline
+      N8N_HEALTH_URL: http://n8n:5678/healthz
+      N8N_API_KEY: ${N8N_API_KEY:-}
     ports:
       - "127.0.0.1:8080:8080"
     depends_on:

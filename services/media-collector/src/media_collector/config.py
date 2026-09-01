@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     ai_worker_url: str = "http://localhost:8090"
     n8n_webhook_url: str = "http://localhost:5678/webhook/fanheat-full-pipeline"
     n8n_x_webhook_url: str = "http://localhost:5678/webhook/fanheat-x-pipeline"
+    n8n_health_url: str = "http://localhost:5678/healthz"
+    n8n_api_key: str | None = None
 
     @property
     def rss_feeds(self) -> list[str]:
