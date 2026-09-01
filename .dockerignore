@@ -1,0 +1,11 @@
+.git
+.idea
+node_modules
+**/node_modules
+dist
+**/dist
+.env
+.env.*
+deploy/frontend.env
+deploy/.keys
+*.log

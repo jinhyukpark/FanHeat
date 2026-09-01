@@ -1,6 +1,10 @@
 node_modules/
 dist/
 target/
+.venv/
+__pycache__/
+.pytest_cache/
+.coverage
 .DS_Store
 .env
 .env.*
@@ -9,4 +13,7 @@ target/
 *.log
 .idea/
 *.iml
-
+deploy/backend.env
+deploy/frontend.env
+deploy/.deploy-state
+deploy/.keys/

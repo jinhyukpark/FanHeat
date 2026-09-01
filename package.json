@@ -3,14 +3,8 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "concurrently --kill-others --names WEB,SPRING --prefix-colors cyan,magenta \"npm --prefix web run dev\" \"mvn -f backend/pom.xml spring-boot:run\"",
-    "dev:web": "npm --prefix web run dev",
-    "dev:backend": "mvn -f backend/pom.xml spring-boot:run",
-    "test:backend": "mvn -f backend/pom.xml test",
-    "build": "npm --prefix web run build && mvn -f backend/pom.xml package",
-    "start": "java -jar backend/target/fanheat-backend-0.1.0-SNAPSHOT.jar"
-  },
-  "devDependencies": {
-    "concurrently": "latest"
+    "dev": "npm --prefix web run dev",
+    "build": "npm --prefix web run build",
+    "preview": "npm --prefix web run preview"
   }
 }

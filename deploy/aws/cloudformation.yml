@@ -1,0 +1,126 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: FANHEAT single EC2 Docker host
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: fanheat
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+  SubnetId:
+    Type: AWS::EC2::Subnet::Id
+  KeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+  SshCidr:
+    Type: String
+    Description: Trusted IPv4 CIDR allowed to SSH, for example 203.0.113.10/32
+    AllowedPattern: '^(?:\d{1,3}\.){3}\d{1,3}/(?:[0-9]|[12][0-9]|3[0-2])$'
+  InstanceType:
+    Type: String
+    Default: t3.small
+    AllowedValues:
+      - t3.micro
+      - t3.small
+      - t3.medium
+  ComposeVersion:
+    Type: String
+    Default: v5.5.0
+
+Resources:
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: FANHEAT web and restricted SSH access
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SshCidr
+          Description: Restricted SSH
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: HTTP
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTPS
+        - IpProtocol: udp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+          Description: HTTP3
+      SecurityGroupEgress:
+        - IpProtocol: '-1'
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-sg'
+
+  Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: '{{resolve:ssm:/aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64}}'
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref KeyName
+      SubnetId: !Ref SubnetId
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: 20
+            Encrypted: true
+            DeleteOnTermination: true
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          set -euxo pipefail
+          dnf update -y
+          dnf install -y docker
+          systemctl enable --now docker
+          usermod -aG docker ec2-user
+          mkdir -p /usr/local/lib/docker/cli-plugins /opt/fanheat
+          curl -fL "https://github.com/docker/compose/releases/download/${ComposeVersion}/docker-compose-linux-x86_64" -o /usr/local/lib/docker/cli-plugins/docker-compose
+          curl -fL "https://github.com/docker/compose/releases/download/${ComposeVersion}/docker-compose-linux-x86_64.sha256" -o /tmp/docker-compose.sha256
+          sed "s#docker-compose-linux-x86_64#/usr/local/lib/docker/cli-plugins/docker-compose#" /tmp/docker-compose.sha256 | sha256sum -c -
+          rm -f /tmp/docker-compose.sha256
+          chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+          curl -fL "https://github.com/docker/buildx/releases/download/v0.36.1/buildx-v0.36.1.linux-amd64" -o /usr/local/lib/docker/cli-plugins/docker-buildx
+          echo "48af8a397ebd60178778bf63611dbcebe5f5e7a9be90eb9147b24b9587455778  /usr/local/lib/docker/cli-plugins/docker-buildx" | sha256sum -c -
+          chmod +x /usr/local/lib/docker/cli-plugins/docker-buildx
+          chown -R ec2-user:ec2-user /opt/fanheat
+          fallocate -l 2G /swapfile
+          chmod 600 /swapfile
+          mkswap /swapfile
+          swapon /swapfile
+          echo '/swapfile none swap sw 0 0' >> /etc/fstab
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-app'
+
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      InstanceId: !Ref Instance
+      Tags:
+        - Key: Name
+          Value: !Sub '${ProjectName}-eip'
+
+Outputs:
+  InstanceId:
+    Value: !Ref Instance
+  PublicIp:
+    Value: !Ref ElasticIp
+  WebsiteUrl:
+    Value: !Sub 'http://${ElasticIp}'
+  SshCommand:
+    Value: !Sub 'ssh ec2-user@${ElasticIp}'

@@ -1,0 +1,37 @@
+{
+  "id": "x9FwyLmTAJ9bHxwv",
+  "name": "FANHEAT publish approved AI content",
+  "nodes": [
+    {
+      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 5 }] } },
+      "id": "schedule-publish",
+      "name": "Every 5 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai-worker:8090/v1/publish/run",
+        "sendHeaders": true,
+        "headerParameters": { "parameters": [{ "name": "X-FANHEAT-API-KEY", "value": "={{ $env.FANHEAT_INTERNAL_API_KEY }}" }] },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"limit\":1}",
+        "options": { "timeout": 600000 }
+      },
+      "id": "publish-due",
+      "name": "Publish One Due Draft",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 0]
+    }
+  ],
+  "connections": {
+    "Every 5 minutes": { "main": [[{ "node": "Publish One Due Draft", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1" },
+  "active": true,
+  "versionId": "629c06b2-6312-47bc-8e86-0100e8097e55"
+}

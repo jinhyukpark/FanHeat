@@ -1,4 +1,6 @@
 import { requireSupabase } from './supabase'
+import { PROFILE_DISPLAY_DEFAULTS, withProfileDisplayDefaults } from './profile-defaults'
+import { MAX_FEATURED_MEDIA_COUNT, assertFeaturedMediaLimit } from './post-limits'
 
 const imageName = value => /^https?:\/\//.test(value || '') ? value : value?.replace(/^\/images\//, '') ?? ''
 
@@ -6,15 +8,15 @@ export async function loadHomeData() {
   const client = requireSupabase()
   const [tracksResult, awardsResult, postsResult, artistsResult] = await Promise.all([
     client.from('tracks').select('id,artist_id,title,subtitle,cover_url,audio_url,display_order').eq('active', true).order('display_order'),
-    client.from('award_entries').select('id,name,image_url,score,period,display_order').eq('active', true).order('display_order'),
+    client.from('award_entries').select('id,name,image_url,score,period,display_order,artist:artists(id,slug,name,name_ko,image_url,description,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,artist_albums(id,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,display_order,artist_album_tracks(id,track_number,title,duration_text,lyrics_excerpt,youtube_url,display_order)),artist_gallery_items(id,title,image_url,captured_on,display_order),artist_fans(id,display_name,handle,avatar_url,heat_percent,featured_rank,display_order))').eq('active', true).order('display_order'),
     client.from('posts').select('id,author_id,title,summary,body_html,tags,reference_url,audio_url,audio_title,audio_artist,view_count,vote_count,author_display_name,published_at,created_at,post_images(image_url,sort_order),comments(count)').eq('status', 'published').order('published_at', { ascending: false }).order('created_at', { ascending: false }),
-    client.from('artists').select('id,name,name_ko,image_url').eq('active', true).order('id'),
+    client.from('artists').select('id,slug,name,name_ko,image_url,description,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,artist_albums(id,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,display_order,artist_album_tracks(id,track_number,title,duration_text,lyrics_excerpt,youtube_url,display_order)),artist_gallery_items(id,title,image_url,captured_on,display_order),artist_fans(id,display_name,handle,avatar_url,heat_percent,featured_rank,display_order)').eq('active', true).order('id'),
   ])
   const error = tracksResult.error || awardsResult.error || postsResult.error || artistsResult.error
   if (error) throw error
   return {
     tracks: tracksResult.data.map(row => [row.title, row.subtitle, imageName(row.cover_url), row]),
-    awards: awardsResult.data.map(row => [row.name, Number(row.score).toLocaleString(), imageName(row.image_url), row]),
+    awards: awardsResult.data.map(row => [row.name, Number(row.score).toLocaleString(), imageName(row.image_url), { ...row, ...(row.artist || {}) }]),
     artists: artistsResult.data,
     posts: postsResult.data.map(row => {
       const images = [...(row.post_images || [])].sort((a, b) => a.sort_order - b.sort_order).map(item => imageName(item.image_url))
@@ -45,9 +47,13 @@ export async function castDailyArtistVote(userId, artistId) {
 
 export async function loadComments(postId) {
   if (!postId) return []
-  const { data, error } = await requireSupabase().from('comments').select('id,author_id,author_display_name,author_avatar_url,parent_id,body,like_count,dislike_count,created_at,updated_at').eq('post_id', postId).is('deleted_at', null).order('created_at', { ascending: true })
-  if (error) throw error
-  return data
+  const client = requireSupabase()
+  const [comments, tombstones] = await Promise.all([
+    client.from('comments').select('id,author_id,author_display_name,author_avatar_url,parent_id,body,like_count,dislike_count,created_at,updated_at,deleted_at').eq('post_id', postId).is('deleted_at', null).order('created_at', { ascending: true }),
+    client.from('comment_tombstones').select('comment_id,parent_id,deleted_at').eq('post_id', postId).order('deleted_at', { ascending: true }),
+  ])
+  if (comments.error || tombstones.error) throw comments.error || tombstones.error
+  return [...comments.data, ...tombstones.data.map(row => ({ id: row.comment_id, parent_id: row.parent_id, body: '', author_display_name: '삭제된 댓글', created_at: row.deleted_at, updated_at: row.deleted_at, deleted_at: row.deleted_at, like_count: 0, dislike_count: 0 }))]
 }
 
 export async function loadCommentReactions(userId, commentIds) {
@@ -71,9 +77,23 @@ export async function setCommentReaction(commentId, userId, reaction) {
 
 export async function loadUserComments(userId) {
   if (!userId) return []
-  const { data, error } = await requireSupabase().from('comments').select('id,post_id,author_id,author_display_name,author_avatar_url,body,created_at').eq('author_id', userId).is('deleted_at', null).order('created_at', { ascending: false })
+  const { data, error } = await requireSupabase().from('comments').select('id,post_id,author_id,author_display_name,author_avatar_url,body,like_count,dislike_count,created_at').eq('author_id', userId).is('deleted_at', null).order('created_at', { ascending: false })
   if (error) throw error
   return data
+}
+
+export async function loadBestFriends(userId) {
+  if (!userId) return []
+  const { data, error } = await requireSupabase().rpc('get_my_best_friends')
+  if (error) throw error
+  return data || []
+}
+
+export async function loadPublicProfileFriends(userId) {
+  if (!userId) return []
+  const { data, error } = await requireSupabase().rpc('get_public_profile_friends', { target_user_id: userId })
+  if (error) throw error
+  return data || []
 }
 
 export async function updateComment(commentId, userId, body) {
@@ -83,7 +103,13 @@ export async function updateComment(commentId, userId, body) {
 }
 
 export async function deleteComment(commentId, userId) {
-  const { error } = await requireSupabase().from('comments').update({ deleted_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq('id', commentId).eq('author_id', userId)
+  const client = requireSupabase()
+  const now = new Date().toISOString()
+  const { data: comment, error: readError } = await client.from('comments').select('id,post_id,parent_id').eq('id', commentId).eq('author_id', userId).single()
+  if (readError) throw readError
+  const { error: tombstoneError } = await client.from('comment_tombstones').insert({ comment_id: commentId, post_id: comment.post_id, parent_id: comment.parent_id, deleted_at: now })
+  if (tombstoneError) throw tombstoneError
+  const { error } = await client.from('comments').update({ deleted_at: now, updated_at: now }).eq('id', commentId).eq('author_id', userId)
   if (error) throw error
 }
 
@@ -94,7 +120,9 @@ export async function addComment(postId, user, body, parentId = null) {
     post_id: postId,
     author_id: user.id,
     author_display_name: profile?.display_name || user.user_metadata?.display_name || user.email?.split('@')[0] || 'FAN',
-    author_avatar_url: profile?.avatar_url || user.user_metadata?.avatar_url || null,
+    // Keep comment identity consistent with the avatar shown in the signed-in header.
+    // The profile row can contain an older or no-longer-valid storage URL.
+    author_avatar_url: user.user_metadata?.avatar_url || profile?.avatar_url || null,
     parent_id: parentId,
     body,
   }).select('id,author_id,author_display_name,author_avatar_url,parent_id,body,like_count,dislike_count,created_at,updated_at').single()
@@ -102,7 +130,26 @@ export async function addComment(postId, user, body, parentId = null) {
   return data
 }
 
-export async function publishPost(draft, user, imageFiles = [], imagePreviews = []) {
+const postImageTypes = new Map([
+  ['image/jpeg', 'jpg'],
+  ['image/png', 'png'],
+  ['image/webp', 'webp'],
+  ['image/gif', 'gif'],
+])
+
+async function uploadPostImage(client, file, userId, postId, kind = 'representative') {
+  const extension = postImageTypes.get(file?.type)
+  if (!extension || file.size > 10 * 1024 * 1024) throw new Error('게시글 이미지는 JPG, PNG, WebP, GIF 형식으로 10MB까지 등록할 수 있습니다.')
+  const objectPath = `${userId}/posts/${postId}/${kind}-${crypto.randomUUID()}.${extension}`
+  const upload = await client.storage.from('fanheat-assets').upload(objectPath, file, { cacheControl: '3600', upsert: false, contentType: file.type })
+  if (upload.error) throw upload.error
+  const { data: publicAsset } = client.storage.from('fanheat-assets').getPublicUrl(objectPath)
+  return { objectPath, publicUrl: publicAsset.publicUrl }
+}
+
+export async function publishPost(draft, user, imageFiles = [], imagePreviews = [], inlineFiles = [], inlinePreviews = []) {
+  assertFeaturedMediaLimit({ imageFiles, imagePreviews, mediaItems: draft.mediaItems || [] })
+  const client = requireSupabase()
   const { data, error } = await requireSupabase().from('posts').insert({
     author_id: user.id,
     author_display_name: user.user_metadata?.display_name || user.email?.split('@')[0] || 'FAN',
@@ -110,7 +157,7 @@ export async function publishPost(draft, user, imageFiles = [], imagePreviews = 
     summary: draft.summary.trim(),
     body_html: draft.content,
     tags: draft.tags.split(',').map(tag => tag.trim()).filter(Boolean),
-    reference_url: draft.reference || null,
+    reference_url: draft.mediaItems?.[0]?.url || draft.mediaUrl || draft.reference || null,
     audio_url: '/sample.mp3',
     audio_title: '비도 오고 그래서',
     audio_artist: '헤이즈 (Heize)',
@@ -118,23 +165,383 @@ export async function publishPost(draft, user, imageFiles = [], imagePreviews = 
     published_at: new Date().toISOString(),
   }).select().single()
   if (error) throw error
-  if (imageFiles.length) {
-    const uploaded = []
-    const uploadedUrls = []
-    for (const [index, file] of imageFiles.slice(0, 5).entries()) {
-      const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg'
-      const objectPath = `${user.id}/posts/${data.id}/${crypto.randomUUID()}.${extension}`
-      const upload = await requireSupabase().storage.from('fanheat-assets').upload(objectPath, file, { cacheControl: '3600', upsert: false, contentType: file.type })
-      if (upload.error) throw upload.error
-      const { data: publicAsset } = requireSupabase().storage.from('fanheat-assets').getPublicUrl(objectPath)
-      uploaded.push({ post_id: data.id, image_url: publicAsset.publicUrl, sort_order: index })
-      uploadedUrls.push(publicAsset.publicUrl)
+  const uploadedPaths = []
+  try {
+    const representativeUrls = []
+    for (const [index, file] of imageFiles.slice(0, MAX_FEATURED_MEDIA_COUNT).entries()) {
+      const uploaded = await uploadPostImage(client, file, user.id, data.id)
+      uploadedPaths.push(uploaded.objectPath)
+      representativeUrls.push(uploaded.publicUrl)
     }
-    const imagesResult = await requireSupabase().from('post_images').insert(uploaded)
-    if (imagesResult.error) throw imagesResult.error
-    const persistedHtml = imagePreviews.reduce((html, preview, index) => html.split(preview).join(uploadedUrls[index] || preview), draft.content)
-    const updateResult = await requireSupabase().from('posts').update({ body_html: persistedHtml }).eq('id', data.id).eq('author_id', user.id)
-    if (updateResult.error) throw updateResult.error
+    if (representativeUrls.length) {
+      const imagesResult = await client.from('post_images').insert(representativeUrls.map((imageUrl, index) => ({ post_id: data.id, image_url: imageUrl, sort_order: index })))
+      if (imagesResult.error) throw imagesResult.error
+    }
+    const inlineUrls = []
+    for (const file of inlineFiles.slice(0, 5)) {
+      const uploaded = await uploadPostImage(client, file, user.id, data.id, 'inline')
+      uploadedPaths.push(uploaded.objectPath)
+      inlineUrls.push(uploaded.publicUrl)
+    }
+    const replacements = [...imagePreviews.map((preview, index) => [preview, representativeUrls[index]]), ...inlinePreviews.map((preview, index) => [preview, inlineUrls[index]])]
+    const persistedHtml = replacements.reduce((html, [preview, url]) => url ? html.split(preview).join(url) : html, draft.content)
+    if (persistedHtml !== draft.content) {
+      const updateResult = await client.from('posts').update({ body_html: persistedHtml }).eq('id', data.id).eq('author_id', user.id)
+      if (updateResult.error) throw updateResult.error
+    }
+    return { ...data, body_html: persistedHtml }
+  } catch (uploadError) {
+    if (uploadedPaths.length) await client.storage.from('fanheat-assets').remove(uploadedPaths)
+    await client.from('posts').delete().eq('id', data.id).eq('author_id', user.id)
+    throw uploadError
   }
+}
+
+export async function updatePost(postId, draft, user, imageFiles = [], imagePreviews = [], inlineFiles = [], inlinePreviews = []) {
+  assertFeaturedMediaLimit({ imageFiles, imagePreviews, mediaItems: draft.mediaItems || [] })
+  const client = requireSupabase()
+  const fields = {
+    title: draft.title.trim(),
+    summary: draft.summary.trim(),
+    body_html: draft.content,
+    tags: draft.tags.split(',').map(tag => tag.trim()).filter(Boolean),
+    reference_url: draft.mediaItems?.[0]?.url || draft.mediaUrl || draft.reference || null,
+  }
+  const { data, error } = await client.from('posts').update(fields).eq('id', postId).eq('author_id', user.id).select().single()
+  if (error) throw error
+
+  const uploadedByPreview = new Map()
+  const uploadedPaths = []
+  let fileIndex = 0
+  for (const preview of imagePreviews) {
+    if (!preview.startsWith('blob:')) continue
+    const file = imageFiles[fileIndex++]
+    if (!file) continue
+    const uploaded = await uploadPostImage(client, file, user.id, postId)
+    uploadedPaths.push(uploaded.objectPath)
+    uploadedByPreview.set(preview, uploaded.publicUrl)
+  }
+
+  for (const [index, file] of inlineFiles.slice(0, 5).entries()) {
+    const uploaded = await uploadPostImage(client, file, user.id, postId, 'inline')
+    uploadedPaths.push(uploaded.objectPath)
+    uploadedByPreview.set(inlinePreviews[index], uploaded.publicUrl)
+  }
+
+  const finalImages = imagePreviews.slice(0, MAX_FEATURED_MEDIA_COUNT).map(preview => uploadedByPreview.get(preview) || preview)
+  const deleteImages = await client.from('post_images').delete().eq('post_id', postId)
+  if (deleteImages.error) throw deleteImages.error
+  if (finalImages.length) {
+    const insertImages = await client.from('post_images').insert(finalImages.map((imageUrl, index) => ({ post_id: postId, image_url: imageUrl, sort_order: index })))
+    if (insertImages.error) throw insertImages.error
+  }
+  const persistedHtml = [...uploadedByPreview].reduce((html, [preview, url]) => html.split(preview).join(url), draft.content)
+  if (persistedHtml !== draft.content) {
+    const bodyResult = await client.from('posts').update({ body_html: persistedHtml }).eq('id', postId).eq('author_id', user.id)
+    if (bodyResult.error) throw bodyResult.error
+  }
+  return { ...data, body_html: persistedHtml }
+}
+
+export async function submitFanPhotos(files, note, user) {
+  const client = requireSupabase()
+  const { data: submission, error: submissionError } = await client.from('fan_photo_submissions').insert({
+    submitter_id: user.id,
+    submitter_name: user.user_metadata?.display_name || user.email?.split('@')[0] || 'FAN',
+    note: note.trim() || null,
+  }).select('id,status,created_at').single()
+  if (submissionError) throw submissionError
+
+  const uploadedPaths = []
+  try {
+    const imageRows = []
+    for (const [index, item] of files.entries()) {
+      const extension = item.file.name.split('.').pop()?.toLowerCase() || 'jpg'
+      const objectPath = `${user.id}/${submission.id}/${crypto.randomUUID()}.${extension}`
+      const upload = await client.storage.from('fan-photo-submissions').upload(objectPath, item.file, {
+        cacheControl: '3600',
+        contentType: item.file.type,
+        upsert: false,
+      })
+      if (upload.error) throw upload.error
+      uploadedPaths.push(objectPath)
+      imageRows.push({
+        submission_id: submission.id,
+        object_path: objectPath,
+        original_filename: item.file.name,
+        mime_type: item.file.type,
+        size_bytes: item.file.size,
+        width: item.width,
+        height: item.height,
+        sort_order: index,
+      })
+    }
+    const imagesResult = await client.from('fan_photo_submission_images').insert(imageRows)
+    if (imagesResult.error) throw imagesResult.error
+    return submission
+  } catch (error) {
+    if (uploadedPaths.length) await client.storage.from('fan-photo-submissions').remove(uploadedPaths)
+    await client.from('fan_photo_submissions').delete().eq('id', submission.id).eq('submitter_id', user.id)
+    throw error
+  }
+}
+
+export async function loadProfileGallery(userId) {
+  if (!userId) return []
+  const client = requireSupabase()
+  const { data: rows, error } = await client.from('profile_gallery_images').select('id,user_id,object_path,original_filename,mime_type,size_bytes,width,height,sort_order,created_at').eq('user_id', userId).order('sort_order')
+  if (error) throw error
+  return Promise.all(rows.map(async row => {
+    const { data, error: signedUrlError } = await client.storage.from('profile-gallery').createSignedUrl(row.object_path, 3600)
+    if (signedUrlError) throw signedUrlError
+    return { ...row, signedUrl: data.signedUrl }
+  }))
+}
+
+export async function uploadProfileGalleryImages(items, userId, occupiedSlots = []) {
+  const client = requireSupabase()
+  const availableSlots = Array.from({ length: 10 }, (_, index) => index).filter(index => !occupiedSlots.includes(index))
+  if (!userId || !items.length) return loadProfileGallery(userId)
+  if (items.length > availableSlots.length) throw new Error('사진은 최대 10장까지 등록할 수 있습니다.')
+
+  const uploadedPaths = []
+  try {
+    const rows = []
+    for (const [index, item] of items.entries()) {
+      const extension = item.file.name.split('.').pop()?.toLowerCase() || 'jpg'
+      const objectPath = `${userId}/${crypto.randomUUID()}.${extension}`
+      const upload = await client.storage.from('profile-gallery').upload(objectPath, item.file, {
+        cacheControl: '3600',
+        contentType: item.file.type,
+        upsert: false,
+      })
+      if (upload.error) throw upload.error
+      uploadedPaths.push(objectPath)
+      rows.push({
+        user_id: userId,
+        object_path: objectPath,
+        original_filename: item.file.name,
+        mime_type: item.file.type,
+        size_bytes: item.file.size,
+        width: item.width,
+        height: item.height,
+        sort_order: availableSlots[index],
+      })
+    }
+    const insert = await client.from('profile_gallery_images').insert(rows)
+    if (insert.error) throw insert.error
+    return loadProfileGallery(userId)
+  } catch (error) {
+    if (uploadedPaths.length) await client.storage.from('profile-gallery').remove(uploadedPaths)
+    throw error
+  }
+}
+
+export async function deleteProfileGalleryImage(image, userId) {
+  const client = requireSupabase()
+  const remove = await client.storage.from('profile-gallery').remove([image.object_path])
+  if (remove.error) throw remove.error
+  const deleted = await client.from('profile_gallery_images').delete().eq('id', image.id).eq('user_id', userId)
+  if (deleted.error) throw deleted.error
+}
+
+const profileFields = 'id,display_name,avatar_url,bio,cover_url,avatar_object_path,cover_object_path,avatar_urls,avatar_object_paths,cover_urls,cover_object_paths,profile_headline,facebook_url,x_url,instagram_url,tiktok_url,youtube_url,favorite_track_id,updated_at'
+
+export async function loadProfileCustomization(userId) {
+  if (!userId) return null
+  const { data, error } = await requireSupabase().from('profiles').select(profileFields).eq('id', userId).single()
+  if (error) throw error
+  return withProfileDisplayDefaults(data)
+}
+
+export async function saveProfileCustomization({ userId, values, avatarItems = [], coverItems = [] }) {
+  if (!userId) throw new Error('로그인이 필요합니다.')
+  const client = requireSupabase()
+  if (avatarItems.length > 5 || coverItems.length > 5) throw new Error('프로필 사진과 배경 이미지는 각각 최대 5장까지 등록할 수 있습니다.')
+  const { data: current, error: currentError } = await client.from('profiles').select('avatar_object_path,cover_object_path,avatar_object_paths,cover_object_paths').eq('id', userId).single()
+  if (currentError) throw currentError
+  const uploaded = []
+  const upload = async (file, kind) => {
+    if (!file) return null
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type) || file.size > 5 * 1024 * 1024) throw new Error('프로필과 배경 이미지는 JPG, PNG, WebP 형식으로 5MB까지 등록할 수 있습니다.')
+    const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+    const path = `${userId}/profile/${kind}-${crypto.randomUUID()}.${extension}`
+    const result = await client.storage.from('fanheat-assets').upload(path, file, { cacheControl: '3600', contentType: file.type, upsert: false })
+    if (result.error) throw result.error
+    uploaded.push(path)
+    return { path, url: client.storage.from('fanheat-assets').getPublicUrl(path).data.publicUrl }
+  }
+  try {
+    const saveItems = async (items, kind) => {
+      const saved = []
+      for (const item of items) {
+        if (item.file) saved.push(await upload(item.file, kind))
+        else if (item.url) saved.push({ url: item.url, path: item.path || null })
+      }
+      return saved
+    }
+    const avatars = await saveItems(avatarItems, 'avatar')
+    const covers = await saveItems(coverItems, 'cover')
+    const payload = {
+      display_name: values.displayName.trim(),
+      profile_headline: values.headline.trim().slice(0, 40) || PROFILE_DISPLAY_DEFAULTS.profile_headline,
+      bio: values.bio.trim() || PROFILE_DISPLAY_DEFAULTS.bio,
+      facebook_url: values.facebookUrl.trim() || PROFILE_DISPLAY_DEFAULTS.facebook_url,
+      x_url: values.xUrl.trim() || PROFILE_DISPLAY_DEFAULTS.x_url,
+      instagram_url: values.instagramUrl.trim() || PROFILE_DISPLAY_DEFAULTS.instagram_url,
+      tiktok_url: values.tiktokUrl.trim() || null,
+      youtube_url: values.youtubeUrl.trim() || null,
+      favorite_track_id: values.favoriteTrackId ? Number(values.favoriteTrackId) : null,
+      updated_at: new Date().toISOString(),
+      avatar_urls: avatars.map(item => item.url),
+      avatar_object_paths: avatars.map(item => item.path || ''),
+      cover_urls: covers.map(item => item.url),
+      cover_object_paths: covers.map(item => item.path || ''),
+      avatar_url: avatars[0]?.url || null,
+      avatar_object_path: avatars[0]?.path || null,
+      cover_url: covers[0]?.url || null,
+      cover_object_path: covers[0]?.path || null,
+    }
+    const { data, error } = await client.from('profiles').update(payload).eq('id', userId).select(profileFields).single()
+    if (error) throw error
+    await client.auth.updateUser({ data: { display_name: data.display_name, avatar_url: data.avatar_url } })
+    const retainedPaths = new Set([...avatars, ...covers].map(item => item.path).filter(Boolean))
+    const obsolete = [...new Set([
+      ...(current.avatar_object_paths || []),
+      ...(current.cover_object_paths || []),
+      current.avatar_object_path,
+      current.cover_object_path,
+    ].filter(path => path && !retainedPaths.has(path)))]
+    if (obsolete.length) await client.storage.from('fanheat-assets').remove(obsolete)
+    return data
+  } catch (error) {
+    if (uploaded.length) await client.storage.from('fanheat-assets').remove(uploaded)
+    throw error
+  }
+}
+
+export async function loadFanCred(userId) {
+  if (!userId) return 0
+  const { data, error } = await requireSupabase().from('fan_cred_events').select('points').eq('recipient_id', userId)
+  if (error) throw error
+  return data.reduce((total, event) => total + Number(event.points || 0), 0)
+}
+
+export async function setPostVote(postId, userId, voted) {
+  const client = requireSupabase()
+  const result = voted
+    ? await client.from('post_votes').insert({ post_id: postId, user_id: userId })
+    : await client.from('post_votes').delete().eq('post_id', postId).eq('user_id', userId)
+  if (result.error && result.error.code !== '23505') throw result.error
+}
+
+export async function loadPostVote(postId, userId) {
+  if (!postId || !userId) return false
+  const { data, error } = await requireSupabase().from('post_votes').select('post_id').eq('post_id', postId).eq('user_id', userId).maybeSingle()
+  if (error) throw error
+  return Boolean(data)
+}
+
+export async function loadPostBookmark(postId, userId) {
+  if (!postId || !userId) return false
+  const { data, error } = await requireSupabase().from('post_bookmarks').select('post_id').eq('post_id', postId).eq('user_id', userId).maybeSingle()
+  if (error) throw error
+  return Boolean(data)
+}
+
+export async function setPostBookmark(postId, userId, bookmarked) {
+  const client = requireSupabase()
+  const result = bookmarked
+    ? await client.from('post_bookmarks').insert({ post_id: postId, user_id: userId })
+    : await client.from('post_bookmarks').delete().eq('post_id', postId).eq('user_id', userId)
+  if (result.error && result.error.code !== '23505') throw result.error
+}
+
+export async function loadUserBookmarks(userId) {
+  if (!userId) return []
+  const { data, error } = await requireSupabase().from('post_bookmarks').select('post_id,created_at').eq('user_id', userId).order('created_at', { ascending: false })
+  if (error) throw error
   return data
+}
+
+const messageProfileFields = 'id,display_name,avatar_url'
+const messageFields = `id,sender_id,recipient_id,reply_to_id,body,read_at,created_at,sender:profiles!private_messages_sender_id_fkey(${messageProfileFields}),recipient:profiles!private_messages_recipient_id_fkey(${messageProfileFields})`
+
+export async function loadPrivateMessages(userId) {
+  if (!userId) return []
+  const { data, error } = await requireSupabase()
+    .from('private_messages')
+    .select(messageFields)
+    .or(`sender_id.eq.${userId},recipient_id.eq.${userId}`)
+    .order('created_at', { ascending: false })
+    .limit(100)
+  if (error) throw error
+  return data
+}
+
+export async function loadUnreadMessageCount(userId) {
+  if (!userId) return 0
+  const { count, error } = await requireSupabase()
+    .from('private_messages')
+    .select('id', { count: 'exact', head: true })
+    .eq('recipient_id', userId)
+    .is('read_at', null)
+  if (error) throw error
+  return count || 0
+}
+
+export async function loadMessageContacts(userId) {
+  if (!userId) return []
+  const { data, error } = await requireSupabase()
+    .from('profiles')
+    .select(messageProfileFields)
+    .neq('id', userId)
+    .order('display_name')
+    .limit(100)
+  if (error) throw error
+  return data
+}
+
+export async function sendPrivateMessage({ senderId, recipientId, body, replyToId = null }) {
+  const message = body.trim()
+  if (!senderId || !recipientId) throw new Error('받는 사람을 선택해 주세요.')
+  if (!message) throw new Error('쪽지 내용을 입력해 주세요.')
+  const { data, error } = await requireSupabase()
+    .from('private_messages')
+    .insert({ sender_id: senderId, recipient_id: recipientId, body: message, reply_to_id: replyToId })
+    .select(messageFields)
+    .single()
+  if (error) throw error
+  return data
+}
+
+export async function markPrivateMessageRead(messageId, userId) {
+  if (!messageId || !userId) return
+  const { error } = await requireSupabase()
+    .from('private_messages')
+    .update({ read_at: new Date().toISOString() })
+    .eq('id', messageId)
+    .eq('recipient_id', userId)
+    .is('read_at', null)
+  if (error) throw error
+}
+
+export async function loadMessageBlocks(userId) {
+  if (!userId) return []
+  const { data, error } = await requireSupabase()
+    .from('message_blocks')
+    .select(`blocker_id,blocked_user_id,created_at,blocked:profiles!message_blocks_blocked_user_id_fkey(${messageProfileFields})`)
+    .eq('blocker_id', userId)
+    .order('created_at', { ascending: false })
+  if (error) throw error
+  return data
+}
+
+export async function setMessageBlock(blockerId, blockedUserId, blocked) {
+  if (!blockerId || !blockedUserId) throw new Error('차단할 사용자를 확인할 수 없습니다.')
+  const client = requireSupabase()
+  const result = blocked
+    ? await client.from('message_blocks').upsert({ blocker_id: blockerId, blocked_user_id: blockedUserId }, { onConflict: 'blocker_id,blocked_user_id' })
+    : await client.from('message_blocks').delete().eq('blocker_id', blockerId).eq('blocked_user_id', blockedUserId)
+  if (result.error) throw result.error
 }

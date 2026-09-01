@@ -1,0 +1,33 @@
+/* The desktop post feed uses a true overlay thumb, so no scrollbar gutter shifts the list. */
+@media(min-width:1025px){
+  .content:has(>.awards)>.feed,
+  .content:has(>.awards)>.feed.is-scrolling{
+    position:relative;
+    scrollbar-width:none!important;
+    scrollbar-color:transparent transparent!important;
+    scrollbar-gutter:auto!important;
+  }
+
+  .content:has(>.awards)>.feed::-webkit-scrollbar,
+  .content:has(>.awards)>.feed.is-scrolling::-webkit-scrollbar{
+    width:0!important;
+    height:0!important;
+  }
+
+  .content:has(>.awards)>.feed::after{
+    content:'';
+    width:4px;
+    height:var(--feed-scroll-height,46px);
+    position:absolute;
+    z-index:8;
+    top:var(--feed-scroll-top,4px);
+    right:3px;
+    border-radius:4px;
+    background:#817a8999;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity .16s ease;
+  }
+
+  .content:has(>.awards)>.feed.is-scrolling::after{opacity:1}
+}

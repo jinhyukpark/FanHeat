@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "check:typography": "node scripts/check-my-page-typography.mjs",
+    "build": "npm run check:typography && vite build",
     "preview": "vite preview"
   },
   "dependencies": {

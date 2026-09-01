@@ -1,0 +1,27 @@
+{
+  "name": "FANHEAT - K-POP Fan Community",
+  "short_name": "FANHEAT",
+  "description": "K-POP 아티스트, 앨범, 콘서트 일정과 팬 콘텐츠를 만나는 K-컬처 커뮤니티",
+  "lang": "ko-KR",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "portrait-primary",
+  "background_color": "#ffffff",
+  "theme_color": "#7857e8",
+  "categories": ["social", "entertainment", "music"],
+  "shortcuts": [
+    { "name": "FANHEAT 홈", "short_name": "홈", "url": "/" },
+    { "name": "새 글 작성", "short_name": "글쓰기", "url": "/?compose=1" }
+  ],
+  "icons": [
+    {
+      "src": "/images/fanheat-logo.png",
+      "sizes": "520x520",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

@@ -1,0 +1,67 @@
+{
+  "id": "dWbqXZiadA9pj47T",
+  "name": "FANHEAT AI comments and replies",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "schedule-ai-comments",
+      "name": "Every 5 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai-worker:8090/v1/engagement/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-FANHEAT-API-KEY",
+              "value": "={{ $env.FANHEAT_INTERNAL_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"limit\":30}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "run-ai-comments",
+      "name": "Plan and Publish Due AI Comments",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 0]
+    }
+  ],
+  "connections": {
+    "Every 5 minutes": {
+      "main": [
+        [
+          {
+            "node": "Plan and Publish Due AI Comments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": true,
+  "versionId": "8d5ac5f0-8ab6-4c21-a718-74d99b37d523"
+}

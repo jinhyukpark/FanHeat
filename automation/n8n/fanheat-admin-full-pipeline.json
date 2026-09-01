@@ -1,0 +1,73 @@
+{
+  "id": "bsJX9Qd4M0gxO92k",
+  "name": "FANHEAT admin full pipeline",
+  "nodes": [
+    {
+      "parameters": {"httpMethod": "POST", "path": "fanheat-full-pipeline", "responseMode": "onReceived", "options": {}},
+      "id": "admin-webhook",
+      "name": "Admin Full Pipeline Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "webhookId": "fanheat-full-pipeline"
+    },
+    {
+      "parameters": {"jsCode": "const headers = $json.headers ?? {};\nif (headers['x-fanheat-automation-key'] !== $env.FANHEAT_INTERNAL_API_KEY) throw new Error('invalid automation key');\nconst body = $json.body ?? $json;\nreturn (body.queries ?? []).map(query => ({ json: { ...body, query } }));"},
+      "id": "expand-queries",
+      "name": "Expand Search Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://collector-api:8080/v1/collections/sync",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-FANHEAT-API-KEY", "value": "={{ $env.FANHEAT_INTERNAL_API_KEY }}"}]},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source: $json.source, query: $json.query, max_results: $json.max_results, order: $json.order, published_after: $json.published_within_hours ? $now.minus({ hours: $json.published_within_hours }).toISO() : undefined, region_code: $json.region_code, language_code: $json.language_code, language_filter_mode: $json.language_filter_mode }) }}",
+        "options": {"timeout": 120000}
+      },
+      "id": "collect-current-query",
+      "name": "Collect Current Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {"jsCode": "const results = $input.all().map(item => item.json);\nconst source = results[0]?.source;\nconst collected = results.reduce((sum, item) => sum + (Number(item.collected) || 0), 0);\nconst batches = Math.max(1, Math.ceil(collected / 50));\nreturn Array.from({ length: batches }, (_, index) => ({ json: { source, batch: index + 1, batches, collected } }));"},
+      "id": "join-results",
+      "name": "Create Source AI Batches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [720, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai-worker:8090/v1/pipeline/run",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-FANHEAT-API-KEY", "value": "={{ $env.FANHEAT_INTERNAL_API_KEY }}"}]},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ limit: 50, create_drafts: true, source: $json.source }) }}",
+        "options": {"timeout": 600000}
+      },
+      "id": "generate-drafts",
+      "name": "Generate AI Drafts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 0]
+    }
+  ],
+  "connections": {
+    "Admin Full Pipeline Webhook": {"main": [[{"node": "Expand Search Queries", "type": "main", "index": 0}]]},
+    "Expand Search Queries": {"main": [[{"node": "Collect Current Query", "type": "main", "index": 0}]]},
+    "Collect Current Query": {"main": [[{"node": "Create Source AI Batches", "type": "main", "index": 0}]]},
+    "Create Source AI Batches": {"main": [[{"node": "Generate AI Drafts", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1"},
+  "active": true
+}

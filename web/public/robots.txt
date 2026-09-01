@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+# 배포 도메인이 확정되면 아래 줄을 활성화하고 실제 도메인으로 변경하세요.
+# Sitemap: https://www.example.com/sitemap.xml

@@ -1,0 +1,31 @@
+{$SITE_ADDRESS::80} {
+	encode zstd gzip
+
+	@health path /healthz
+	handle @health {
+		respond "ok" 200
+	}
+
+	@service_worker path /sw.js /site.webmanifest
+	header @service_worker Cache-Control "no-cache, no-store, must-revalidate"
+
+	@assets path /assets/*
+	header @assets Cache-Control "public, max-age=31536000, immutable"
+
+	handle {
+		root * /srv
+		try_files {path} /index.html
+		file_server
+	}
+
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "SAMEORIGIN"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
+		Cross-Origin-Opener-Policy "same-origin-allow-popups"
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-src https://www.youtube.com https://www.youtube-nocookie.com https://platform.twitter.com https://www.facebook.com https://www.instagram.com https://www.tiktok.com; font-src 'self' data:; worker-src 'self' blob:; manifest-src 'self'"
+	}
+}

@@ -1,0 +1,86 @@
+{
+  "id": "63k7nJXpSdTmcv34",
+  "name": "FANHEAT scheduled YouTube collection to AI drafts",
+  "nodes": [
+    {
+      "parameters": {"rule": {"interval": [{"field": "cronExpression", "expression": "0 8 * * *"}]}},
+      "id": "youtube-daily-trigger",
+      "name": "Every day at 08:00 KST",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "url": "http://collector-api:8080/v1/automation/config/youtube",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-FANHEAT-API-KEY", "value": "={{ $env.FANHEAT_INTERNAL_API_KEY }}"}]},
+        "options": {"timeout": 30000}
+      },
+      "id": "load-youtube-config",
+      "name": "Load Saved YouTube Settings",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {"jsCode": "if (!$json.configured) throw new Error('YOUTUBE_API_KEY is not configured');\nreturn ($json.queries ?? []).map(query => ({ json: { ...$json, query } }));"},
+      "id": "expand-youtube-queries",
+      "name": "Expand Saved YouTube Queries",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://collector-api:8080/v1/collections/sync",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-FANHEAT-API-KEY", "value": "={{ $env.FANHEAT_INTERNAL_API_KEY }}"}]},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ source: $json.source, query: $json.query, max_results: $json.max_results, order: $json.order, published_after: $now.minus({ hours: $json.published_within_hours }).toISO(), region_code: $json.region_code, language_code: $json.language_code, language_filter_mode: $json.language_filter_mode }) }}",
+        "options": {"timeout": 120000}
+      },
+      "id": "collect-youtube-query",
+      "name": "Collect Saved YouTube Query",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 0]
+    },
+    {
+      "parameters": {"jsCode": "const results = $input.all().map(item => item.json);\nconst collected = results.reduce((sum, item) => sum + (Number(item.collected) || 0), 0);\nconst batches = Math.max(1, Math.ceil(collected / 50));\nreturn Array.from({ length: batches }, (_, index) => ({ json: { source: 'youtube', batch: index + 1, batches, collected } }));"},
+      "id": "create-youtube-ai-batches",
+      "name": "Create YouTube AI Batches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [960, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai-worker:8090/v1/pipeline/run",
+        "sendHeaders": true,
+        "headerParameters": {"parameters": [{"name": "X-FANHEAT-API-KEY", "value": "={{ $env.FANHEAT_INTERNAL_API_KEY }}"}]},
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"limit\":50,\"create_drafts\":true,\"source\":\"youtube\"}",
+        "options": {"timeout": 600000}
+      },
+      "id": "generate-youtube-drafts",
+      "name": "Generate YouTube AI Drafts",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 0]
+    }
+  ],
+  "connections": {
+    "Every day at 08:00 KST": {"main": [[{"node": "Load Saved YouTube Settings", "type": "main", "index": 0}]]},
+    "Load Saved YouTube Settings": {"main": [[{"node": "Expand Saved YouTube Queries", "type": "main", "index": 0}]]},
+    "Expand Saved YouTube Queries": {"main": [[{"node": "Collect Saved YouTube Query", "type": "main", "index": 0}]]},
+    "Collect Saved YouTube Query": {"main": [[{"node": "Create YouTube AI Batches", "type": "main", "index": 0}]]},
+    "Create YouTube AI Batches": {"main": [[{"node": "Generate YouTube AI Drafts", "type": "main", "index": 0}]]}
+  },
+  "settings": {"executionOrder": "v1", "timezone": "Asia/Seoul"},
+  "active": true
+}
