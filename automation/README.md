@@ -29,6 +29,7 @@ cp automation/.env.example automation/.env
 - 한국 네이버 뉴스 검색을 사용할 경우 `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`
 - NAVER Cloud의 NAVER API HUB 키는 `NAVER_API_PROVIDER=api_hub`로 설정합니다.
   기존 developers.naver.com 검색 애플리케이션 키만 `developers`를 사용합니다.
+- 같은 키의 `검색어 트렌드` 권한을 사용해 최근 30일 국내 K-POP 검색량을 분석합니다. 추천 결과는 6시간 캐시되며 YouTube, News/RSS, X 작업 설정에 공통 반영됩니다.
 
 Collector의 아티스트 자동화 Webhook은 기본적으로
 `http://n8n:5678/webhook/fanheat-artist-import`를 사용합니다. 별도 n8n 호스트를 쓰는 경우
@@ -77,6 +78,8 @@ News/RSS 화면의 `수집 허용 언론사`에는 언론사명, 기사 원문 �
 News/RSS 수집 화면의 `뉴스 수집 시작일`과 `뉴스 수집 종료일`은 한국 시간 기준의 포함 범위입니다. 직접 수집과 관리자 전체 자동화 모두 같은 범위를 사용하며, n8n은 계산된 UTC `published_after`/`published_before` 값을 Collector에 그대로 전달합니다. Naver News Search는 기간 파라미터가 없으므로 Collector가 최신순 결과를 페이지 단위로 탐색한 뒤 선택 기간 밖의 기사를 제외합니다(검색 API가 제공하는 최대 결과 범위 내).
 
 `NAVER_CLIENT_ID`와 `NAVER_CLIENT_SECRET`이 설정된 한국 수집은 네이버 뉴스 검색 API를 우선 사용합니다. NAVER API HUB 모드는 `https://naverapihub.apigw.ntruss.com/search/v1/news`와 `X-NCP-APIGW-API-KEY-ID`/`X-NCP-APIGW-API-KEY` 헤더를 사용합니다. 네이버 응답의 `originallink`를 기사 원문으로 저장하고 그 도메인으로 언론사 허용 목록을 검사합니다. 네이버 뉴스 검색 API 응답에는 이미지 필드가 없으므로, 썸네일이 허용된 언론사는 원문 OpenGraph 정보를 보조 경로로 확인합니다.
+
+네이버 검색어 트렌드는 FANHEAT 공개 아티스트를 후보로 비교합니다. 공통 `KPOP·케이팝·아이돌` 기준 그룹으로 API 배치 간 상대 검색량을 보정하고, 최근 7일 검색량·직전 7일 대비 상승률·최근 수집 콘텐츠 언급량·FANHEAT 관심 지표를 합쳐 상위 아티스트와 활동 키워드를 추천합니다. API HUB는 `https://naverapihub.apigw.ntruss.com/search-trend/v1/search`, 기존 Developers 키는 `https://openapi.naver.com/v1/datalab/search`를 사용합니다. 트렌드 API가 일시적으로 실패하면 수집을 중단하지 않고 내부 언급·관심 지표 순위로 대체합니다.
 
 X 수집 전에는 `automation/.env`의 `X_BEARER_TOKEN` 설정이 필요합니다. 관리자 Webhook은 내부 자동화 키를 검사하므로 브라우저나 외부 클라이언트가 n8n Webhook을 직접 호출하지 않습니다.
 

@@ -1,5 +1,5 @@
-const CACHE = 'fanheat-shell-v3'
-const SHELL = ['/', '/site.webmanifest', '/favicon.svg?v=2', '/images/fanheat-app-icon-192.png?v=2', '/images/fanheat-app-icon-512.png?v=2', '/images/apple-touch-icon.png?v=2']
+const CACHE = 'fanheat-shell-v4'
+const SHELL = ['/', '/site.webmanifest', '/images/fanheat-app-icon-192.png?v=3', '/images/fanheat-app-icon-512.png?v=3', '/images/apple-touch-icon.png?v=3']
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()))

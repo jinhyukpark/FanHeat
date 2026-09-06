@@ -12,6 +12,7 @@ from .config import get_settings
 from .db import get_db
 from .models import CollectionJob, CollectionRule, CollectorSettings
 from .presets import ensure_default_queries
+from .recommendations import trending_idol_recommendations
 from .schemas import CollectionOrder, CollectionRequest, CollectionResult, Source, XDriveImportRequest
 from .service import CollectionService, ConnectorRegistry
 from .tasks import collect_media
@@ -82,6 +83,8 @@ def get_automation_config(source: Source, db: Session = Depends(get_db)) -> dict
         )
         .order_by(CollectionRule.created_at)
     ).all()
+    recommendation = trending_idol_recommendations(db)
+    effective_queries = list(dict.fromkeys([*recommendation["queries"], *queries]))[:30]
     settings = get_settings()
     configured = {
         Source.YOUTUBE: bool(settings.youtube_api_key),
@@ -95,7 +98,9 @@ def get_automation_config(source: Source, db: Session = Depends(get_db)) -> dict
     return {
         "source": source.value,
         "configured": configured,
-        "queries": list(queries),
+        "queries": effective_queries,
+        "recommended_queries": recommendation["queries"],
+        "naver_trend": recommendation["naver_trend"],
         "max_results": 15,
         "order": CollectionOrder.VIEW_COUNT.value,
         "published_within_hours": 24,

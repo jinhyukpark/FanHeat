@@ -312,6 +312,24 @@
     clip-path:polygon(0 100%,100% 0,100% 100%);
     pointer-events:none;
   }
+  .detail-shell:not(.compose-shell) .post-detail:has(.detail-carousel:not(.detail-mixed-carousel),.detail-mixed-carousel.active-image,.detail-mixed-carousel.active-youtube:not(.youtube-portrait)) .detail-hero{
+    min-height:540px;
+  }
+  .detail-shell:not(.compose-shell) .post-detail:has(.detail-carousel:not(.detail-mixed-carousel),.detail-mixed-carousel.active-image,.detail-mixed-carousel.active-youtube:not(.youtube-portrait)) .detail-body{
+    margin-top:-315px;
+  }
+  .detail-shell:not(.compose-shell) .post-detail:has(.detail-carousel:not(.detail-mixed-carousel),.detail-mixed-carousel.active-image,.detail-mixed-carousel.active-youtube:not(.youtube-portrait)) .detail-hero::after{
+    height:180px;
+  }
+  /* Attached-image posts use a larger canvas and a steeper diagonal.  At the
+     media's left edge the gradient now reaches roughly the image midpoint,
+     then rises toward the right edge instead of appearing almost flat. */
+  .detail-shell:not(.compose-shell) .post-detail:has(.detail-carousel:not(.detail-mixed-carousel),.detail-mixed-carousel.active-image) .detail-carousel{
+    width:min(100%,640px);
+  }
+  .detail-shell:not(.compose-shell) .post-detail:has(.detail-carousel:not(.detail-mixed-carousel),.detail-mixed-carousel.active-image) .detail-hero::after{
+    height:300px;
+  }
   .detail-shell:not(.compose-shell) .post-detail:has(.detail-mixed-carousel.active-x) .detail-hero{
     --detail-desktop-diagonal-depth:310px;
   }

@@ -21,6 +21,7 @@ from .config import get_settings
 from .db import get_db
 from .models import CollectionJob, CollectionRule, CollectorSettings, MediaItem
 from .presets import default_news_sources, ensure_default_queries
+from .recommendations import trending_idol_recommendations
 from .schemas import CollectionOrder, CollectionRequest, LanguageFilterMode, NewsSourceSetting, Source
 from .tasks import collect_media
 
@@ -129,6 +130,7 @@ class AdminCollectionRequest(BaseModel):
     language_filter_mode: LanguageFilterMode = LanguageFilterMode.STRICT
     collection_date: date | None = None
     news_sources: list[NewsSourceSetting] = Field(default_factory=list, max_length=50)
+    include_trending_idols: bool = True
 
     @model_validator(mode="after")
     def validate_news_date_range(self) -> "AdminCollectionRequest":
@@ -795,11 +797,17 @@ async def n8n_status() -> dict:
 
 @router.post("/api/collections", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(require_admin)])
 def start_collection(request: AdminCollectionRequest, db: Session = Depends(get_db)) -> dict:
+    recommendation = trending_idol_recommendations(db) if request.include_trending_idols else {"queries": []}
+    queries = normalize_queries([*recommendation["queries"], *request.queries])[:30]
     if request.source == Source.X:
-        trigger_x_drive_workflow(request, create_drafts=False)
-        return {"job_ids": [], "status": "accepted", "message": "선택 날짜의 Google Sheet X 포스트 가져오기를 시작했습니다."}
+        trigger_x_drive_workflow(request, create_drafts=False, trend_queries=queries)
+        return {
+            "job_ids": [],
+            "status": "accepted",
+            "message": "네이버 트렌드 키워드를 반영해 선택 날짜의 Google Sheet X 포스트 가져오기를 시작했습니다.",
+            "recommended_queries": recommendation["queries"],
+        }
     require_source_configuration(request.source)
-    queries = normalize_queries(request.queries)
     if not queries:
         raise HTTPException(status_code=422, detail="검색어를 하나 이상 입력하세요")
     published_after, published_before = collection_window(request)
@@ -832,6 +840,7 @@ def start_collection(request: AdminCollectionRequest, db: Session = Depends(get_
         "job_ids": [job.id for job in jobs],
         "status": "pending",
         "command": command_preview(request, queries),
+        "recommended_queries": recommendation["queries"],
     }
 
 
@@ -962,6 +971,11 @@ def save_queries(source: Source, request: SavedQueriesRequest, db: Session = Dep
     return {"source": source.value, "queries": queries}
 
 
+@router.get("/api/query-recommendations/{source}", dependencies=[Depends(require_admin)])
+def query_recommendations(source: Source, db: Session = Depends(get_db)) -> dict:
+    return {"source": source.value} | trending_idol_recommendations(db)
+
+
 def date_bounds(start_date: date | None, end_date: date | None) -> tuple[datetime | None, datetime | None]:
     if start_date and end_date and start_date > end_date:
         raise HTTPException(status_code=422, detail="시작일은 종료일보다 늦을 수 없습니다")
@@ -1047,11 +1061,12 @@ def run_ai_pipeline(request: AdminPipelineRequest) -> dict:
 
 @router.post("/api/automation", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(require_admin)])
 def run_full_automation(request: AdminCollectionRequest, db: Session = Depends(get_db)) -> dict:
+    recommendation = trending_idol_recommendations(db) if request.include_trending_idols else {"queries": []}
+    queries = normalize_queries([*recommendation["queries"], *request.queries])[:30]
     if request.source == Source.X:
-        trigger_x_drive_workflow(request, create_drafts=True)
+        trigger_x_drive_workflow(request, create_drafts=True, trend_queries=queries)
         return {"status": "accepted", "message": "n8n이 선택 날짜의 Google Sheet를 가져온 뒤 X 포스트 AI 초안을 생성합니다."}
     require_source_configuration(request.source)
-    queries = normalize_queries(request.queries)
     if not queries:
         raise HTTPException(status_code=422, detail="검색어를 하나 이상 입력하세요")
     locale = db.get(CollectorSettings, True)
@@ -1087,13 +1102,18 @@ def run_full_automation(request: AdminCollectionRequest, db: Session = Depends(g
     return {"status": "accepted", "message": f"n8n {workflow_name} 전체 자동화를 시작했습니다. 수집 후 AI 초안이 생성됩니다."}
 
 
-def trigger_x_drive_workflow(request: AdminCollectionRequest, create_drafts: bool) -> None:
+def trigger_x_drive_workflow(request: AdminCollectionRequest, create_drafts: bool, trend_queries: list[str]) -> None:
     settings = get_settings()
     collection_date = request.collection_date or datetime.now(ZoneInfo("Asia/Seoul")).date()
     try:
         response = httpx.post(
             settings.n8n_x_webhook_url,
-            json={"source": "x", "collection_date": collection_date.isoformat(), "create_drafts": create_drafts},
+            json={
+                "source": "x",
+                "collection_date": collection_date.isoformat(),
+                "create_drafts": create_drafts,
+                "trend_queries": trend_queries,
+            },
             headers={"X-FANHEAT-AUTOMATION-KEY": settings.internal_api_key or ""},
             timeout=15,
         )
@@ -1548,7 +1568,7 @@ ADMIN_HTML = """<!doctype html>
     label{font-size:13px;color:var(--muted);font-weight:700}input,select,button{font:inherit;font-size:14px;border-radius:9px}input,select{width:100%;min-height:44px;padding:11px 12px;background-color:#101219;color:var(--text);border:1px solid var(--line);outline:none}input:focus,select:focus{border-color:#6d7890;box-shadow:0 0 0 2px #6d789033}select{appearance:none;-webkit-appearance:none;padding-right:44px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='8' viewBox='0 0 14 8'%3E%3Cpath d='M1 1l6 6 6-6' fill='none' stroke='%23c7cdd8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 16px center;background-size:14px 8px;cursor:pointer}select::-ms-expand{display:none}
     .tagbox{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-height:48px;padding:8px;background:#101219;border:1px solid var(--line);border-radius:9px}.tagbox:focus-within{border-color:#626b7d}.tagbox #tags{display:contents}.tag{display:inline-flex;align-items:center;gap:7px;background:#2c3140;border:1px solid #444b5d;border-radius:999px;padding:6px 8px 6px 11px;font-size:14px}.tag button{background:transparent;color:#c9cfda;padding:0 3px;font-size:16px;line-height:1}.tagbox input{flex:1;min-width:180px;padding:6px;border:0;background:transparent;outline:0}
     .x-drive-settings{grid-column:1/-1;display:grid;gap:7px;padding:14px;border:1px solid #3f6c5a;border-radius:10px;background:#16352955}.x-drive-settings[hidden],.direct-search-setting[hidden],.news-source-settings[hidden]{display:none!important}.x-drive-settings strong{font-size:14px;color:var(--ok)}.x-drive-settings span{font-size:13px;color:#d4ddd9}.x-drive-settings code{overflow-wrap:anywhere;color:#a7d8c2;font-size:12px}
-    .news-date-range{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;border:1px solid #3e526f;border-radius:10px;background:#101722}.news-date-range[hidden]{display:none!important}.news-date-range .field{margin:0}.news-date-range p{grid-column:1/-1;margin:0;color:var(--muted);font-size:12px}.news-source-settings{grid-column:1/-1;display:grid;gap:10px;padding:14px;border:1px solid #3e526f;border-radius:10px;background:#101722}.news-source-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.news-source-head strong{display:block;font-size:14px}.news-source-head span,.news-source-note{display:block;color:var(--muted);font-size:12px}.news-source-head button,.news-source-actions button{min-height:36px;padding:7px 10px}.news-source-list{display:grid;gap:9px}.news-source-row{display:grid;grid-template-columns:minmax(110px,.7fr) minmax(150px,1fr);gap:8px;padding:11px;border:1px solid #343d4d;border-radius:9px;background:#151a22}.news-source-row .rss{grid-column:1/-1}.news-source-row input[type=text],.news-source-row input[type=url]{min-height:40px}.news-source-checks{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px 16px}.news-source-checks label{display:flex;align-items:center;gap:7px;color:#dce2ed;font-size:12px}.news-source-checks input{width:17px;height:17px;min-height:0;accent-color:#8b6cff}.news-source-remove{justify-self:end;min-height:32px;padding:5px 9px;background:#452432;color:#ffb2c0}.news-source-actions{display:flex;justify-content:flex-end}.news-source-empty{padding:12px;border:1px dashed #414858;border-radius:8px;color:var(--muted);font-size:12px;text-align:center}
+    .news-date-range{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;border:1px solid #3e526f;border-radius:10px;background:#101722}.news-date-range[hidden]{display:none!important}.news-date-range .field{margin:0}.news-date-range p{grid-column:1/-1;margin:0;color:var(--muted);font-size:12px}.news-recommendations{grid-column:1/-1;display:grid;gap:10px;padding:13px;border:1px solid #4d456f;border-radius:10px;background:#211d32}.news-recommendations[hidden]{display:none!important}.news-recommendation-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.news-recommendation-head strong{display:block;font-size:14px}.news-recommendation-head span{display:block;margin-top:2px;color:#c4bbdf;font-size:12px}.news-recommendation-head button{min-height:36px;padding:7px 10px;background:#7057e8;white-space:nowrap}.news-auto-toggle{display:flex;align-items:flex-start;gap:8px;color:#e3ddf6;font-size:13px}.news-auto-toggle input{width:17px;height:17px;min-height:0;margin-top:2px;accent-color:#8b6cff}.news-idol-list{display:flex;flex-wrap:wrap;gap:6px}.news-idol-chip{padding:5px 8px;border:1px solid #5a4f7b;border-radius:999px;background:#171326;color:#ddd5f5;font-size:12px}.news-recommendation-empty{color:#b8afcf;font-size:12px}.news-source-settings{grid-column:1/-1;display:grid;gap:10px;padding:14px;border:1px solid #3e526f;border-radius:10px;background:#101722}.news-source-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.news-source-head strong{display:block;font-size:14px}.news-source-head span,.news-source-note{display:block;color:var(--muted);font-size:12px}.news-source-head button,.news-source-actions button{min-height:36px;padding:7px 10px}.news-source-list{display:grid;gap:9px}.news-source-row{display:grid;grid-template-columns:minmax(110px,.7fr) minmax(150px,1fr);gap:8px;padding:11px;border:1px solid #343d4d;border-radius:9px;background:#151a22}.news-source-row .rss{grid-column:1/-1}.news-source-row input[type=text],.news-source-row input[type=url]{min-height:40px}.news-source-checks{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px 16px}.news-source-checks label{display:flex;align-items:center;gap:7px;color:#dce2ed;font-size:12px}.news-source-checks input{width:17px;height:17px;min-height:0;accent-color:#8b6cff}.news-source-remove{justify-self:end;min-height:32px;padding:5px 9px;background:#452432;color:#ffb2c0}.news-source-actions{display:flex;justify-content:flex-end}.news-source-empty{padding:12px;border:1px dashed #414858;border-radius:8px;color:var(--muted);font-size:12px;text-align:center}
     button{border:0;background:var(--hot);color:white;font-weight:800;padding:12px 22px;cursor:pointer}button:disabled{opacity:.35;cursor:not-allowed;filter:saturate(.25);box-shadow:none!important}.actions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:18px}.actions .secondary{background:#343a48}
     pre{white-space:pre-wrap;word-break:break-word;background:#101219;border:1px solid var(--line);padding:14px;border-radius:10px;color:#dce2ed;font-size:12px;min-height:72px}
     .status{padding:14px;border-radius:10px;background:#101219;border:1px solid var(--line)}.status strong{color:var(--warn)}.status.done strong{color:var(--ok)}.status.failed strong{color:var(--hot)}
@@ -1588,7 +1608,8 @@ ADMIN_HTML = """<!doctype html>
       <form id="form"><section id="collection-settings-panel" class="setup-tab-panel active" role="tabpanel" aria-labelledby="collection-settings-tab"><div class="grid">
         <p id="source-warning" class="warning wide" hidden></p>
         <div id="x-drive-settings" class="x-drive-settings" hidden><strong>Google Drive X 포스트 가져오기</strong><span>정기 작업은 매주 월요일·목요일 오전 9시(한국 시간)에 실행됩니다.</span><span>오른쪽 최근 작업의 종료일에 해당하는 날짜 폴더와 Google Sheet를 읽습니다.</span><code>FANHEAT/X-KPOP-Trends/YYYY/MM/YYYY-MM-DD/FANHEAT_X_KPOP_후보_YYYY-MM-DD</code></div>
-        <div class="field direct-search-setting"><label for="query">검색어 태그</label><div id="tagbox" class="tagbox"><div id="tags"></div><input id="query" maxlength="500" placeholder="Enter 또는 쉼표로 추가"></div></div>
+        <div class="field query-setting"><label for="query">검색어 태그</label><div id="tagbox" class="tagbox"><div id="tags"></div><input id="query" maxlength="500" placeholder="Enter 또는 쉼표로 추가"></div></div>
+        <section id="news-recommendations" class="news-recommendations"><div class="news-recommendation-head"><div><strong>네이버 K-POP 검색 트렌드</strong><span>네이버 검색량과 최근 30일 언급량, FANHEAT 관심 지표를 함께 분석합니다.</span></div><button id="apply-news-recommendations" type="button">추천 키워드 모두 입력</button></div><label class="news-auto-toggle"><input id="include-trending-idols" type="checkbox" checked><span>현재 채널 수집을 실행할 때 최신 트렌드 키워드를 자동으로 포함</span></label><div id="news-idol-list" class="news-idol-list"><span class="news-recommendation-empty">추천 정보를 불러오는 중입니다.</span></div></section>
         <div class="field direct-search-setting"><label for="max">검색어별 최대 결과</label><input id="max" type="number" min="1" max="100" value="15"></div>
         <div class="field direct-search-setting"><label for="region">수집 국가</label><select id="region"><option value="KR">한국</option><option value="JP">일본</option><option value="US">미국</option><option value="GB">영국</option><option value="CA">캐나다</option><option value="AU">호주</option><option value="TW">대만</option><option value="SG">싱가포르</option><option value="ID">인도네시아</option><option value="TH">태국</option><option value="PH">필리핀</option><option value="VN">베트남</option><option value="BR">브라질</option><option value="MX">멕시코</option><option value="DE">독일</option><option value="FR">프랑스</option></select></div>
         <div class="field direct-search-setting"><label for="language">우선 언어</label><select id="language"><option value="ko">한국어</option><option value="ja">일본어</option><option value="en">영어</option><option value="zh-Hant">중국어(번체)</option><option value="id">인도네시아어</option><option value="th">태국어</option><option value="vi">베트남어</option><option value="pt">포르투갈어</option><option value="es">스페인어</option><option value="de">독일어</option><option value="fr">프랑스어</option></select></div>
@@ -1651,11 +1672,11 @@ function renderNewsSources(){const list=$('news-source-list');list.innerHTML=new
 $('add-news-source').addEventListener('click',()=>{newsSources.push({name:'',domains:'',source_url:'',rss_url:'',enabled:true,allow_thumbnail_preview:false});renderNewsSources();$('news-source-list').querySelector('[data-news-index]:last-child input')?.focus()});
 $('news-source-list').addEventListener('input',event=>{const row=event.target.closest('[data-news-index]'),field=event.target.dataset.newsField;if(!row||!field)return;const source=newsSources[Number(row.dataset.newsIndex)];source[field]=event.target.type==='checkbox'?event.target.checked:event.target.value;preview()});
 $('news-source-list').addEventListener('click',event=>{const button=event.target.closest('[data-remove-news-source]');if(!button)return;newsSources.splice(Number(button.dataset.removeNewsSource),1);renderNewsSources()});
-function updateSourceContext(){const source=currentSource(),label=sourceLabels[source]||source,isX=source==='x',isNews=source==='news';syncSourcePicker();$('media-tab-label').textContent=isX?'최근 수집 X 포스트':isNews?'최근 수집 뉴스':'최근 수집 YouTube 미디어';$('reload-media').textContent=isX?'X 포스트 새로고침':isNews?'뉴스 새로고침':'미디어 새로고침';document.querySelectorAll('.direct-search-setting').forEach(field=>field.hidden=isX);document.querySelectorAll('.relative-time-setting').forEach(field=>field.hidden=isX||isNews);$('x-drive-settings').hidden=!isX;$('news-date-range').hidden=!isNews;$('news-source-settings').hidden=!isNews;[$('job-source-label'),$('console-source-label')].forEach(item=>{item.textContent=label;item.classList.toggle('x',isX)});localStorage.setItem('fanheat-collector-source',source)}
+function updateSourceContext(){const source=currentSource(),label=sourceLabels[source]||source,isX=source==='x',isNews=source==='news';syncSourcePicker();$('media-tab-label').textContent=isX?'최근 수집 X 포스트':isNews?'최근 수집 뉴스':'최근 수집 YouTube 미디어';$('reload-media').textContent=isX?'X 포스트 새로고침':isNews?'뉴스 새로고침':'미디어 새로고침';document.querySelectorAll('.direct-search-setting').forEach(field=>field.hidden=isX);document.querySelectorAll('.relative-time-setting').forEach(field=>field.hidden=isX||isNews);$('x-drive-settings').hidden=!isX;$('news-date-range').hidden=!isNews;$('news-recommendations').hidden=false;$('news-source-settings').hidden=!isNews;[$('job-source-label'),$('console-source-label')].forEach(item=>{item.textContent=label;item.classList.toggle('x',isX)});localStorage.setItem('fanheat-collector-source',source)}
 function updateSourceCapability(){const source=currentSource(),capability=sourceCapabilities[source]||{},ready=capability.configured!==false,warning=$('source-warning'),notice=capability.notice||'';warning.hidden=ready&&!notice;warning.textContent=!ready?`${sourceLabels[source]} 수집 연결이 준비되지 않았습니다.`:notice;if(!ready){$('run').disabled=true;$('run-all').disabled=true}else if(!aiPipelineRunning){$('run').disabled=false;$('run-all').disabled=false}}
 async function loadSourceCapabilities(){sourceCapabilities=await api('/admin/api/source-capabilities');updateSourceCapability()}
 updateSourceContext();
-function payload(){const source=$('source').value,collectionDate=$('filter-end')?.value||localDateValue(new Date()),isNews=source==='news';if(source==='x')return{source,queries:[],collection_date:collectionDate};return{source,queries:[...tags],max_results:Number($('max').value),order:$('order').value,published_within_hours:isNews?null:($('hours').value?Number($('hours').value):null),published_from:isNews?$('news-date-start').value:null,published_to:isNews?$('news-date-end').value:null,region_code:$('region').value,language_code:$('language').value,language_filter_mode:$('language-filter-mode').value,news_sources:isNews?newsSourcePayload():[]}}
+function payload(){const source=$('source').value,collectionDate=$('filter-end')?.value||localDateValue(new Date()),isNews=source==='news';if(source==='x')return{source,queries:[...tags],collection_date:collectionDate,include_trending_idols:$('include-trending-idols').checked};return{source,queries:[...tags],max_results:Number($('max').value),order:$('order').value,published_within_hours:isNews?null:($('hours').value?Number($('hours').value):null),published_from:isNews?$('news-date-start').value:null,published_to:isNews?$('news-date-end').value:null,region_code:$('region').value,language_code:$('language').value,language_filter_mode:$('language-filter-mode').value,news_sources:isNews?newsSourcePayload():[],include_trending_idols:$('include-trending-idols').checked}}
 function collectionWindowPreview(p){if(p.source==='news'&&p.published_from&&p.published_to){const endExclusive=new Date(new Date(`${p.published_to}T00:00:00+09:00`).getTime()+86400000);return{published_after:new Date(`${p.published_from}T00:00:00+09:00`).toISOString(),published_before:endExclusive.toISOString()}}if(p.published_within_hours)return{published_after:`<UTC now - ${p.published_within_hours} hours>`};return{}}
 function preview(){const p=payload(), body={source:p.source,query:p.query,max_results:p.max_results,order:p.order,...collectionWindowPreview(p)};$('command').textContent=`curl -X POST http://localhost:8080/v1/collections \\\n  -H 'X-FANHEAT-API-KEY: $FANHEAT_INTERNAL_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '${JSON.stringify(body)}'`}
 document.querySelectorAll('input,select').forEach(el=>el.addEventListener('input',preview));preview();
@@ -1665,6 +1686,10 @@ function validateCollectionRange(){if(currentSource()!=='news')return true;const
 function renderTags(){$('tags').innerHTML=tags.map((tag,index)=>`<span class="tag">${esc(tag)}<button type="button" data-index="${index}" aria-label="${esc(tag)} 삭제">×</button></span>`).join('');preview()}
 async function saveTags(){await api(`/admin/api/queries/${$('source').value}`,{method:'PUT',body:JSON.stringify({queries:tags})})}
 async function loadTags(){const data=await api(`/admin/api/queries/${$('source').value}`);tags=data.queries;renderTags()}
+let newsRecommendations={artists:[],queries:[]};
+function renderNewsRecommendations(){const list=$('news-idol-list'),artists=newsRecommendations.artists||[],naverOk=newsRecommendations.naver_trend?.status==='ok';list.innerHTML=artists.length?artists.map(artist=>{const trend=artist.naver_trend_score==null?'네이버 자료 없음':`네이버 ${Number(artist.naver_trend_score).toFixed(1)}`;return `<span class="news-idol-chip" title="${esc(trend)} · 최근 언급 ${Number(artist.recent_mentions)||0}건 · ${esc((artist.activity_keywords||[]).join(', '))}">${esc(artist.name)} · ${esc(trend)}</span>`}).join(''):`<span class="news-recommendation-empty">추천할 공개 아티스트가 없습니다.</span>`;if(!naverOk&&artists.length)list.insertAdjacentHTML('beforeend','<span class="news-recommendation-empty">네이버 트렌드 조회 실패 · 내부 지표 순위 사용</span>')}
+async function loadNewsRecommendations(){const button=$('apply-news-recommendations');button.disabled=true;try{newsRecommendations=await api(`/admin/api/query-recommendations/${currentSource()}`);renderNewsRecommendations()}catch(error){$('news-idol-list').innerHTML=`<span class="news-recommendation-empty">${esc(error.message)}</span>`}finally{button.disabled=false}}
+$('apply-news-recommendations').addEventListener('click',async()=>{if(!(newsRecommendations.queries||[]).length)await loadNewsRecommendations();const recommended=newsRecommendations.queries||[];if(!recommended.length)return;tags=[...new Set([...recommended,...tags])].slice(0,30);renderTags();try{await saveTags();$('status').className='status done';$('status').textContent=`네이버 K-POP 트렌드 키워드 ${recommended.length}개를 ${sourceLabels[currentSource()]} 작업 설정에 반영했습니다.`}catch(error){$('status').className='status failed';$('status').textContent=error.message}});
 function addFromInput(){const values=$('query').value.split(',').map(v=>v.trim()).filter(Boolean);for(const value of values)if(!tags.includes(value)&&tags.length<30)tags.push(value);$('query').value='';renderTags();saveTags().catch(e=>$('status').textContent=e.message)}
 let queryComposing=false,pendingTagCommit=false;
 $('query').addEventListener('compositionstart',()=>{queryComposing=true});
@@ -1672,7 +1697,7 @@ $('query').addEventListener('compositionend',()=>{queryComposing=false;if(pendin
 $('query').addEventListener('keydown',e=>{if(e.key!=='Enter'&&e.key!==',')return;e.preventDefault();if(e.isComposing||queryComposing||e.keyCode===229){pendingTagCommit=true;return}addFromInput()});
 $('query').addEventListener('blur',()=>{if($('query').value.trim())addFromInput()});
 $('tags').addEventListener('click',e=>{const button=e.target.closest('button[data-index]');if(!button)return;tags.splice(Number(button.dataset.index),1);renderTags();saveTags().catch(err=>$('status').textContent=err.message)});
-$('source').addEventListener('change',async()=>{updateSourceContext();updateSourceCapability();selectedMedia.clear();updateMediaSelection();activateWorkbenchPane('media-pane');preview();renderCommandDock();try{await Promise.all([loadTags(),loadJobs(),loadMedia(),loadDrafts()])}catch(e){$('status').textContent=e.message}});
+$('source').addEventListener('change',async()=>{updateSourceContext();updateSourceCapability();selectedMedia.clear();updateMediaSelection();activateWorkbenchPane('media-pane');preview();renderCommandDock();try{await Promise.all([loadTags(),loadJobs(),loadMedia(),loadDrafts(),loadNewsRecommendations()])}catch(e){$('status').textContent=e.message}});
 function saveCommandLogs(){commandLogs=commandLogs.slice(0,50);localStorage.setItem('fanheat-command-logs',JSON.stringify(commandLogs));renderCommandDock()}
 function updateCommandLog(id,updates){const log=commandLogs.find(item=>item.id===id);if(log)Object.assign(log,updates,{updated_at:new Date().toISOString()});saveCommandLogs()}
 function multiPreview(){const p=payload();if(p.source==='x'){commandPreview=`Google Drive 날짜 폴더 확인 → ${p.collection_date}\\nGoogle Sheet → FANHEAT_X_KPOP_후보_${p.collection_date}\\nX 포스트 DB 반영`;renderCommandDock();return}commandPreview=p.queries.map(query=>{const body={source:p.source,query,max_results:p.max_results,order:p.order,region_code:p.region_code,language_code:p.language_code,language_filter_mode:p.language_filter_mode,...collectionWindowPreview(p)};if(p.source==='news')body.news_sources=p.news_sources;return `curl -X POST http://localhost:8080/v1/collections -H 'X-FANHEAT-API-KEY: $FANHEAT_INTERNAL_API_KEY' -H 'Content-Type: application/json' -d '${JSON.stringify(body)}'`}).join('\\n\\n');renderCommandDock()}
@@ -1743,7 +1768,7 @@ $('select-all-drafts').addEventListener('click',()=>{const select=selectedDrafts
 async function runBulk(action){const ids=[...selectedDrafts];if(!ids.length)return;let reason='';if(action==='reject'){reason=await requestRejectionReason(ids.length);if(!reason)return}if(action==='delete'&&!confirm(`선택한 ${ids.length}개 초안을 삭제할까요? 발행 완료 초안은 보호됩니다.`))return;const button=$(action==='approve'?'bulk-approve':action==='reject'?'bulk-reject':'bulk-delete');button.disabled=true;$('ai-result').textContent=`${ids.length}개 처리 중…`;const results=await Promise.allSettled(ids.map(id=>api(`/admin/api/ai/drafts/${id}${action==='approve'?'/approve':action==='reject'?'/reject':''}`,{method:action==='delete'?'DELETE':'POST',...(action==='reject'?{body:JSON.stringify({reason})}:action==='approve'?{body:JSON.stringify({approval_source:'admin_bulk'})}:{body:'{}'})})));const failed=results.filter(r=>r.status==='rejected').length;await loadDrafts();$('status').className=`status ${failed?'failed':'done'}`;$('status').textContent=`선택 초안 ${ids.length-failed}개 처리 완료${failed?` · ${failed}개 실패`:''}`}
 $('bulk-approve').addEventListener('click',()=>runBulk('approve'));$('bulk-reject').addEventListener('click',()=>runBulk('reject'));$('bulk-delete').addEventListener('click',()=>runBulk('delete'));
 $('bulk-publish').addEventListener('click',()=>{const ids=[...selectedDrafts];if(ids.length&&confirm(`선택한 승인 초안 ${ids.length}개를 FANHEAT 사용자 피드에 게시할까요?`))publishDrafts(ids,$('bulk-publish'))});
-$('form').addEventListener('submit',async e=>{e.preventDefault();const isX=currentSource()==='x';if(!isX&&!tags.length){$('status').className='status failed';$('status').textContent='검색어 태그를 하나 이상 추가하세요.';return}if(!validateCollectionRange())return;includeTodayInFilter();$('run').disabled=true;$('status').textContent=isX?'Google Drive에서 X 포스트를 가져오는 중입니다…':`${tags.length}개 작업을 등록하는 중입니다…`;const logId=addCommandLog('수집만 실행',commandPreview);try{if(!isX)await Promise.all([saveTags(),saveLocale()]);const result=await api('/admin/api/collections',{method:'POST',body:JSON.stringify(payload())});updateCommandLog(logId,{status:'접수됨',response:`HTTP 202\n${result.message||`job_ids: ${(result.job_ids||[]).join(', ')}`}`});if(isX){$('status').className='status done';$('status').textContent=result.message;setTimeout(()=>Promise.all([loadJobs(),loadMedia()]),5000);$('run').disabled=false}else poll(result.job_ids,logId)}catch(err){$('status').className='status failed';$('status').textContent=err.message;updateCommandLog(logId,{status:'요청 실패',response:err.message,error:err.message});$('run').disabled=false}});loadTags().catch(e=>$('status').textContent=e.message);loadLocale().catch(e=>$('status').textContent=e.message);loadJobs();
+$('form').addEventListener('submit',async e=>{e.preventDefault();const isX=currentSource()==='x';if(!isX&&!tags.length){$('status').className='status failed';$('status').textContent='검색어 태그를 하나 이상 추가하세요.';return}if(!validateCollectionRange())return;includeTodayInFilter();$('run').disabled=true;$('status').textContent=isX?'Google Drive에서 X 포스트를 가져오는 중입니다…':`${tags.length}개 작업을 등록하는 중입니다…`;const logId=addCommandLog('수집만 실행',commandPreview);try{if(!isX)await Promise.all([saveTags(),saveLocale()]);const result=await api('/admin/api/collections',{method:'POST',body:JSON.stringify(payload())});updateCommandLog(logId,{status:'접수됨',response:`HTTP 202\n${result.message||`job_ids: ${(result.job_ids||[]).join(', ')}`}`});if(isX){$('status').className='status done';$('status').textContent=result.message;setTimeout(()=>Promise.all([loadJobs(),loadMedia()]),5000);$('run').disabled=false}else poll(result.job_ids,logId)}catch(err){$('status').className='status failed';$('status').textContent=err.message;updateCommandLog(logId,{status:'요청 실패',response:err.message,error:err.message});$('run').disabled=false}});loadTags().catch(e=>$('status').textContent=e.message);loadLocale().catch(e=>$('status').textContent=e.message);loadNewsRecommendations();loadJobs();
 $('run-all').addEventListener('click',async()=>{const isX=currentSource()==='x';if(!isX&&!tags.length){$('status').className='status failed';$('status').textContent='검색어 태그를 하나 이상 추가하세요.';return}if(!validateCollectionRange())return;includeTodayInFilter();const button=$('run-all');button.disabled=true;$('status').className='status';$('status').textContent=isX?'Google Sheet X 포스트 수집 및 AI 초안을 요청하는 중입니다…':'n8n 전체 자동화를 요청하는 중입니다…';const logId=addCommandLog('n8n 전체 자동화',`POST /admin/api/automation\n${JSON.stringify(payload(),null,2)}`);try{if(!isX)await Promise.all([saveTags(),saveLocale()]);const result=await api('/admin/api/automation',{method:'POST',body:JSON.stringify(payload())});$('status').className='status done';$('status').innerHTML=`<strong>n8n 실행 요청 완료</strong> · ${esc(result.message)}`;updateCommandLog(logId,{status:'n8n 접수됨',response:`HTTP 202\n${result.message}`});setTimeout(()=>{loadJobs();loadMedia();loadDrafts()},6000)}catch(err){$('status').className='status failed';$('status').textContent=err.message;updateCommandLog(logId,{status:'요청 실패',response:err.message,error:err.message})}finally{button.disabled=false}});
 loadSourceCapabilities().catch(e=>$('status').textContent=e.message);loadMedia();loadDrafts();loadN8nStatus();
 </script></body></html>"""
