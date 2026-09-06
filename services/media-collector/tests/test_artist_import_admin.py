@@ -10,7 +10,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from media_collector import admin, main
-from media_collector.artist_import import ArtistPageParser, _slug
+from media_collector.artist_import import ArtistPageParser, _commons_source_url, _slug
 from media_collector.models import Base, CollectionJob, CollectionRule, CollectorSettings
 from media_collector.presets import DEFAULT_NEWS_SOURCES
 
@@ -61,6 +61,10 @@ def test_artist_import_page_exposes_header_entry_and_all_content_scopes():
     assert 'id="job-search"' in admin.ARTIST_IMPORT_HTML
     assert 'id="job-status"' in admin.ARTIST_IMPORT_HTML
     assert 'id="job-sort"' in admin.ARTIST_IMPORT_HTML
+    assert 'id="discover-artist-sources"' in admin.ARTIST_IMPORT_HTML
+    assert 'id="source-discovery-status"' in admin.ARTIST_IMPORT_HTML
+    assert "chooseArtist(preview.candidates||[],'sources')" in admin.ARTIST_IMPORT_HTML
+    assert 'Wikimedia Commons는 이미지 검증 출처로 항상 포함됩니다.' in admin.ARTIST_IMPORT_HTML
     assert ".jobs-panel{border-color:#566178" in admin.ARTIST_IMPORT_HTML
     assert ".settings-panel{grid-column:1;grid-row:1}" in admin.ARTIST_IMPORT_HTML
     assert ".scope-panel{grid-column:1;grid-row:2}" in admin.ARTIST_IMPORT_HTML
@@ -84,6 +88,40 @@ def test_artist_import_page_exposes_header_entry_and_all_content_scopes():
     assert '.activity-log{display:flex;flex-direction:column;height:270px' in admin.ARTIST_IMPORT_HTML
     assert '/admin/api/artist-imports/activity?limit=50' in admin.ARTIST_IMPORT_HTML
     assert "confirm(`${attention.artist_name}의 공식 채널" in admin.ARTIST_IMPORT_HTML
+
+
+def test_artist_list_uses_admin_summary_filters_and_responsive_cards():
+    page = admin.ARTIST_IMPORT_HTML
+    assert 'class="section-eyebrow">ARTIST MANAGEMENT</span>' in page
+    assert "className='artist-overview'" in page
+    assert "setAttribute('aria-label','아티스트 수집 현황')" in page
+    assert 'className=\'artist-card-avatar\'' in page
+    assert 'className=\'artist-card-action\'' in page
+    assert 'body.artist-list-page .jobs{display:grid;grid-template-columns:repeat(3' in page
+    assert '@media(max-width:700px)' in page
+    assert '<span>아티스트 검색</span><input id="job-search"' in page
+    assert '<span>수집 상태</span><select id="job-status"' in page
+    assert '<span>목록 정렬</span><select id="job-sort"' in page
+    assert 'body.artist-list-page .pane-tabbar{display:none}' in page
+    assert "actions.className='jobs-head-actions'" in page
+    assert "actions.append(refresh,nav)" in page
+    assert 'class="toolbar-heading"' in page
+    assert 'class="metric-value"' in page
+
+
+def test_artist_detail_exposes_collection_editor_and_results_tabs():
+    page = admin.ARTIST_IMPORT_HTML
+    assert "setAttribute('aria-label','아티스트 수집 상세')" in page
+    assert 'data-detail-tab="editor">수집 편집기' in page
+    assert 'data-detail-tab="result" tabindex="-1">수집 결과' in page
+    assert "resultPane.id='artist-result-pane'" in page
+    assert '항목별 수집 현황' in page
+    assert '수집된 내용과 근거' in page
+    assert '보완이 필요한 항목' in page
+    assert "renderArtistResult(job)" in page
+    assert "activityLog.hidden=!result" in page
+    for label in ("프로필", "공식 SNS", "소개", "연혁", "수상", "앨범", "수록곡", "갤러리"):
+        assert label in page
 
 
 def test_artist_import_n8n_workflow_is_versioned_and_active():
@@ -146,6 +184,12 @@ def test_artist_import_request_requires_a_scope_and_valid_official_urls():
         )
 
 
+def test_commons_source_prefers_category_and_has_artist_search_fallback():
+    category_entity = {"claims": {"P373": [{"mainsnak": {"datavalue": {"value": "IVE (group)"}}}]}}
+    assert _commons_source_url(category_entity, "아이브") == "https://commons.wikimedia.org/wiki/Category:IVE_(group)"
+    assert _commons_source_url({}, "아이브") == "https://commons.wikimedia.org/wiki/Special:MediaSearch?type=image&search=%EC%95%84%EC%9D%B4%EB%B8%8C"
+
+
 def test_artist_discovery_uses_name_when_urls_are_empty(monkeypatch):
     monkeypatch.setattr(
         main,
@@ -203,6 +247,7 @@ def test_artist_import_creates_job_and_calls_server_side_n8n_webhook(monkeypatch
     request.identity_confirmation = admin._sign_identity(request, {
         "id": "Q123", "label": "아이유", "english_name": "IU",
         "description": "가수", "entity_url": "https://www.wikidata.org/wiki/Q123",
+        "commons_source_url": "https://commons.wikimedia.org/wiki/Category:IU",
         "official_source_urls": ["https://www.youtube.com/@dlwlrma"],
     })
 
@@ -218,6 +263,11 @@ def test_artist_import_creates_job_and_calls_server_side_n8n_webhook(monkeypatch
     assert sent["job_id"] == job.id
     assert sent["existing_artist_slug"] == "iu"
     assert sent["candidate"]["id"] == "Q123"
+    assert sent["candidate"]["commons_source_url"] == "https://commons.wikimedia.org/wiki/Category:IU"
+    assert sent["official_source_urls"] == [
+        "https://www.youtube.com/@dlwlrma",
+        "https://commons.wikimedia.org/wiki/Category:IU",
+    ]
     assert "identity_confirmation" not in sent
     assert sent["scopes"] == ["profile", "albums", "tracks", "gallery"]
     assert calls[0][1]["headers"]["X-FANHEAT-AUTOMATION-KEY"] == "internal-secret"
@@ -236,6 +286,22 @@ def test_candidate_preview_never_starts_collection(monkeypatch, count):
     for candidate in result["candidates"]:
         request.identity_confirmation = candidate["confirmation"]
         assert admin._confirmed_identity(request)["id"] == candidate["id"]
+
+
+def test_commons_source_alone_does_not_confirm_artist_identity(monkeypatch):
+    from media_collector import artist_import
+    monkeypatch.setattr(admin, "get_settings", lambda: SimpleNamespace(internal_api_key="secret"))
+    monkeypatch.setattr(artist_import, "search_artist_candidates", lambda *args: [{
+        "id": "Q1", "label": "동명이인", "official_source_urls": [],
+        "commons_source_url": "https://commons.wikimedia.org/wiki/Category:Artist",
+    }])
+    request = admin.AdminArtistImportRequest(
+        artist_name="동명이인", scopes=["profile"],
+        official_source_urls=["https://commons.wikimedia.org/wiki/Category:Artist"],
+    )
+    candidate = admin.preview_artist_candidates(request)["candidates"][0]
+    assert candidate["can_collect"] is False
+    assert candidate["confirmation"] is None
 
 
 @pytest.mark.parametrize("change", ["missing", "tampered", "expired", "name", "url"])

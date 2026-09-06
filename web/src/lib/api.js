@@ -4,23 +4,75 @@ import { MAX_FEATURED_MEDIA_COUNT, assertFeaturedMediaLimit } from './post-limit
 
 const imageName = value => /^https?:\/\//.test(value || '') ? value : value?.replace(/^\/images\//, '') ?? ''
 
+const withApprovedGalleryItems = artist => artist ? {
+  ...artist,
+  artist_gallery_items: (artist.artist_gallery_items || []).filter(item => item.active === true && item.review_status === 'approved'),
+} : artist
+
+const optionalHttpUrl = (value, fieldLabel = '출처 URL') => {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  try {
+    const url = new URL(raw)
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error()
+    return url.href
+  } catch {
+    throw new Error(`${fieldLabel}은 http:// 또는 https:// 주소로 입력해 주세요.`)
+  }
+}
+
+const sourceFields = source => ({
+  source_label: String(source?.label || '').trim().slice(0, 120) || null,
+  source_url: optionalHttpUrl(source?.url, '이미지 출처 URL'),
+})
+
+const postSourceRows = draft => {
+  const rawSources = Array.isArray(draft.sourceLinks) && draft.sourceLinks.length
+    ? draft.sourceLinks
+    : draft.reference ? [{ label: draft.referenceLabel, url: draft.reference }] : []
+  const seen = new Set()
+  return rawSources.map(source => {
+    const value = typeof source === 'string' ? { url: source } : source || {}
+    const url = optionalHttpUrl(value.url || value.source_url, '글 출처 URL')
+    if (!url || seen.has(url)) return null
+    seen.add(url)
+    return {
+      label: String(value.label || value.source_label || '').trim().slice(0, 120) || null,
+      url,
+    }
+  }).filter(Boolean).slice(0, 10)
+}
+
+const inlineSourceRows = (imageUrls, sources = []) => imageUrls.map((imageUrl, index) => ({
+  image_url: imageUrl,
+  ...sourceFields(sources[index]),
+}))
+
 export async function loadHomeData() {
   const client = requireSupabase()
   const [tracksResult, awardsResult, postsResult, artistsResult] = await Promise.all([
     client.from('tracks').select('id,artist_id,title,subtitle,cover_url,audio_url,display_order').eq('active', true).order('display_order'),
-    client.from('award_entries').select('id,name,image_url,score,period,display_order,artist:artists(id,slug,name,name_ko,image_url,description,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,artist_albums(id,active,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,display_order,artist_album_tracks(id,active,track_number,title,duration_text,lyrics_excerpt,youtube_url,display_order)),artist_gallery_items(id,title,image_url,original_image_url,captured_on,display_order,source_page_url,source_provider,creator_name,license_name,license_url,attribution_text),artist_fans(id,display_name,handle,avatar_url,heat_percent,featured_rank,display_order))').eq('active', true).order('display_order'),
-    client.from('posts').select('id,author_id,title,summary,body_html,tags,reference_url,audio_url,audio_title,audio_artist,view_count,vote_count,author_display_name,published_at,created_at,post_images(image_url,sort_order),comments(count)').eq('status', 'published').order('published_at', { ascending: false }).order('created_at', { ascending: false }),
-    client.from('artists').select('id,slug,name,name_ko,image_url,description,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,artist_albums(id,active,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,display_order,artist_album_tracks(id,active,track_number,title,duration_text,lyrics_excerpt,youtube_url,display_order)),artist_gallery_items(id,title,image_url,original_image_url,captured_on,display_order,source_page_url,source_provider,creator_name,license_name,license_url,attribution_text),artist_fans(id,display_name,handle,avatar_url,heat_percent,featured_rank,display_order)').eq('active', true).order('id'),
+    client.from('award_entries').select('id,name,image_url,score,period,display_order,artist:artists(id,slug,name,name_ko,image_url,description,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,artist_albums(id,active,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,display_order,artist_album_tracks(id,active,track_number,title,duration_text,lyrics_excerpt,youtube_url,display_order)),artist_gallery_items(id,active,review_status,title,image_url,original_image_url,captured_on,display_order,source_page_url,source_provider,creator_name,license_name,license_url,attribution_text),artist_fans(id,display_name,handle,avatar_url,heat_percent,featured_rank,display_order))').eq('active', true).order('display_order'),
+    client.from('posts').select('id,author_id,title,summary,body_html,tags,reference_url,source_label,source_url,source_links,inline_image_sources,audio_url,audio_title,audio_artist,view_count,vote_count,author_display_name,published_at,created_at,post_images(image_url,sort_order,source_label,source_url),comments(count)').eq('status', 'published').order('published_at', { ascending: false }).order('created_at', { ascending: false }),
+    client.from('artists').select('id,slug,name,name_ko,image_url,description,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,artist_albums(id,active,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,display_order,artist_album_tracks(id,active,track_number,title,duration_text,lyrics_excerpt,youtube_url,display_order)),artist_gallery_items(id,active,review_status,title,image_url,original_image_url,captured_on,display_order,source_page_url,source_provider,creator_name,license_name,license_url,attribution_text),artist_fans(id,display_name,handle,avatar_url,heat_percent,featured_rank,display_order)').eq('active', true).order('id'),
   ])
   const error = tracksResult.error || awardsResult.error || postsResult.error || artistsResult.error
   if (error) throw error
+  const postAuthorIds = [...new Set(postsResult.data.map(row => row.author_id).filter(Boolean))]
+  const postAuthorsResult = postAuthorIds.length
+    ? await client.from('profiles').select('id,avatar_url').in('id', postAuthorIds)
+    : { data: [], error: null }
+  if (postAuthorsResult.error) throw postAuthorsResult.error
+  const postAuthors = Object.fromEntries(postAuthorsResult.data.map(profile => [profile.id, profile]))
   return {
     tracks: tracksResult.data.map(row => [row.title, row.subtitle, imageName(row.cover_url), row]),
-    awards: awardsResult.data.map(row => [row.name, Number(row.score).toLocaleString(), imageName(row.image_url), { ...row, ...(row.artist || {}) }]),
-    artists: artistsResult.data,
+    awards: awardsResult.data.map(row => [row.name, Number(row.score).toLocaleString(), imageName(row.image_url), { ...row, ...(withApprovedGalleryItems(row.artist) || {}) }]),
+    artists: artistsResult.data.map(withApprovedGalleryItems),
     posts: postsResult.data.map(row => {
-      const images = [...(row.post_images || [])].sort((a, b) => a.sort_order - b.sort_order).map(item => imageName(item.image_url))
-      return [row.title, images[0] || 'post_list1.jpg', { ...row, images, comment_count: row.comments?.[0]?.count || 0 }]
+      const postImages = [...(row.post_images || [])].sort((a, b) => a.sort_order - b.sort_order)
+      const images = postImages.map(item => imageName(item.image_url))
+      const imageSources = postImages.map(item => ({ label: item.source_label || '', url: item.source_url || '' }))
+      return [row.title, images[0] || 'post_list1.jpg', { ...row, post_images: postImages, images, image_sources: imageSources, author_avatar_url: postAuthors[row.author_id]?.avatar_url || null, comment_count: row.comments?.[0]?.count || 0 }]
     }),
   }
 }
@@ -40,8 +92,19 @@ export async function loadDailyArtistVotes(userId) {
 
 export async function castDailyArtistVote(userId, artistId) {
   const client = requireSupabase()
-  const { error } = await client.from('daily_artist_votes').insert({ user_id: userId, artist_id: artistId })
-  if (error) throw error
+  const today = seoulDate()
+  const { data: updatedVote, error: updateError } = await client
+    .from('daily_artist_votes')
+    .update({ artist_id: artistId })
+    .eq('user_id', userId)
+    .eq('vote_date', today)
+    .select('artist_id')
+    .maybeSingle()
+  if (updateError) throw updateError
+  if (!updatedVote) {
+    const { error: insertError } = await client.from('daily_artist_votes').insert({ user_id: userId, artist_id: artistId, vote_date: today })
+    if (insertError) throw insertError
+  }
   return loadDailyArtistVotes(userId)
 }
 
@@ -94,6 +157,26 @@ export async function loadPublicProfileFriends(userId) {
   const { data, error } = await requireSupabase().rpc('get_public_profile_friends', { target_user_id: userId })
   if (error) throw error
   return data || []
+}
+
+export async function loadFriendshipStatus(userId, friendId) {
+  if (!userId || !friendId || userId === friendId) return 'none'
+  const { data, error } = await requireSupabase().from('friendships').select('status').eq('owner_id', userId).eq('friend_id', friendId).maybeSingle()
+  if (error) throw error
+  return data?.status || 'none'
+}
+
+export async function sendFriendRequest(userId, friendId) {
+  if (!userId || !friendId || userId === friendId) throw new Error('친구 요청 대상을 확인해 주세요.')
+  const { data, error } = await requireSupabase().from('friendships').insert({ owner_id: userId, friend_id: friendId, status: 'pending', accepted_at: null }).select('status').single()
+  if (error) throw error
+  return data?.status || 'pending'
+}
+
+export async function cancelFriendRequest(userId, friendId) {
+  if (!userId || !friendId) return
+  const { error } = await requireSupabase().from('friendships').delete().eq('owner_id', userId).eq('friend_id', friendId).eq('status', 'pending')
+  if (error) throw error
 }
 
 export async function updateComment(commentId, userId, body) {
@@ -150,6 +233,9 @@ async function uploadPostImage(client, file, userId, postId, kind = 'representat
 export async function publishPost(draft, user, imageFiles = [], imagePreviews = [], inlineFiles = [], inlinePreviews = []) {
   assertFeaturedMediaLimit({ imageFiles, imagePreviews, mediaItems: draft.mediaItems || [] })
   const client = requireSupabase()
+  const sources = postSourceRows(draft)
+  const primarySource = sources[0] || {}
+  const primaryMediaUrl = optionalHttpUrl(draft.mediaItems?.[0]?.url || draft.mediaUrl, '대표 미디어 URL')
   const { data, error } = await requireSupabase().from('posts').insert({
     author_id: user.id,
     author_display_name: user.user_metadata?.display_name || user.email?.split('@')[0] || 'FAN',
@@ -157,7 +243,11 @@ export async function publishPost(draft, user, imageFiles = [], imagePreviews = 
     summary: draft.summary.trim(),
     body_html: draft.content,
     tags: draft.tags.split(',').map(tag => tag.trim()).filter(Boolean),
-    reference_url: draft.mediaItems?.[0]?.url || draft.mediaUrl || draft.reference || null,
+    reference_url: primaryMediaUrl || primarySource.url || null,
+    source_label: primarySource.label || null,
+    source_url: primarySource.url || null,
+    source_links: sources,
+    inline_image_sources: [],
     audio_url: '/sample.mp3',
     audio_title: '비도 오고 그래서',
     audio_artist: '헤이즈 (Heize)',
@@ -174,7 +264,7 @@ export async function publishPost(draft, user, imageFiles = [], imagePreviews = 
       representativeUrls.push(uploaded.publicUrl)
     }
     if (representativeUrls.length) {
-      const imagesResult = await client.from('post_images').insert(representativeUrls.map((imageUrl, index) => ({ post_id: data.id, image_url: imageUrl, sort_order: index })))
+      const imagesResult = await client.from('post_images').insert(representativeUrls.map((imageUrl, index) => ({ post_id: data.id, image_url: imageUrl, sort_order: index, ...sourceFields(draft.imageSources?.[index]) })))
       if (imagesResult.error) throw imagesResult.error
     }
     const inlineUrls = []
@@ -185,8 +275,9 @@ export async function publishPost(draft, user, imageFiles = [], imagePreviews = 
     }
     const replacements = [...imagePreviews.map((preview, index) => [preview, representativeUrls[index]]), ...inlinePreviews.map((preview, index) => [preview, inlineUrls[index]])]
     const persistedHtml = replacements.reduce((html, [preview, url]) => url ? html.split(preview).join(url) : html, draft.content)
-    if (persistedHtml !== draft.content) {
-      const updateResult = await client.from('posts').update({ body_html: persistedHtml }).eq('id', data.id).eq('author_id', user.id)
+    const inlineImageSources = inlineSourceRows(inlineUrls, draft.inlineImageSources)
+    if (persistedHtml !== draft.content || inlineImageSources.length) {
+      const updateResult = await client.from('posts').update({ body_html: persistedHtml, inline_image_sources: inlineImageSources }).eq('id', data.id).eq('author_id', user.id)
       if (updateResult.error) throw updateResult.error
     }
     return { ...data, body_html: persistedHtml }
@@ -200,12 +291,18 @@ export async function publishPost(draft, user, imageFiles = [], imagePreviews = 
 export async function updatePost(postId, draft, user, imageFiles = [], imagePreviews = [], inlineFiles = [], inlinePreviews = []) {
   assertFeaturedMediaLimit({ imageFiles, imagePreviews, mediaItems: draft.mediaItems || [] })
   const client = requireSupabase()
+  const sources = postSourceRows(draft)
+  const primarySource = sources[0] || {}
+  const primaryMediaUrl = optionalHttpUrl(draft.mediaItems?.[0]?.url || draft.mediaUrl, '대표 미디어 URL')
   const fields = {
     title: draft.title.trim(),
     summary: draft.summary.trim(),
     body_html: draft.content,
     tags: draft.tags.split(',').map(tag => tag.trim()).filter(Boolean),
-    reference_url: draft.mediaItems?.[0]?.url || draft.mediaUrl || draft.reference || null,
+    reference_url: primaryMediaUrl || primarySource.url || null,
+    source_label: primarySource.label || null,
+    source_url: primarySource.url || null,
+    source_links: sources,
   }
   const { data, error } = await client.from('posts').update(fields).eq('id', postId).eq('author_id', user.id).select().single()
   if (error) throw error
@@ -222,22 +319,28 @@ export async function updatePost(postId, draft, user, imageFiles = [], imagePrev
     uploadedByPreview.set(preview, uploaded.publicUrl)
   }
 
-  for (const [index, file] of inlineFiles.slice(0, 5).entries()) {
+  let inlineFileIndex = 0
+  for (const preview of inlinePreviews.slice(0, 5)) {
+    if (!preview.startsWith('blob:')) continue
+    const file = inlineFiles[inlineFileIndex++]
+    if (!file) continue
     const uploaded = await uploadPostImage(client, file, user.id, postId, 'inline')
     uploadedPaths.push(uploaded.objectPath)
-    uploadedByPreview.set(inlinePreviews[index], uploaded.publicUrl)
+    uploadedByPreview.set(preview, uploaded.publicUrl)
   }
 
   const finalImages = imagePreviews.slice(0, MAX_FEATURED_MEDIA_COUNT).map(preview => uploadedByPreview.get(preview) || preview)
   const deleteImages = await client.from('post_images').delete().eq('post_id', postId)
   if (deleteImages.error) throw deleteImages.error
   if (finalImages.length) {
-    const insertImages = await client.from('post_images').insert(finalImages.map((imageUrl, index) => ({ post_id: postId, image_url: imageUrl, sort_order: index })))
+    const insertImages = await client.from('post_images').insert(finalImages.map((imageUrl, index) => ({ post_id: postId, image_url: imageUrl, sort_order: index, ...sourceFields(draft.imageSources?.[index]) })))
     if (insertImages.error) throw insertImages.error
   }
   const persistedHtml = [...uploadedByPreview].reduce((html, [preview, url]) => html.split(preview).join(url), draft.content)
-  if (persistedHtml !== draft.content) {
-    const bodyResult = await client.from('posts').update({ body_html: persistedHtml }).eq('id', postId).eq('author_id', user.id)
+  const finalInlineImages = inlinePreviews.slice(0, 5).map(preview => uploadedByPreview.get(preview) || preview)
+  const inlineImageSources = inlineSourceRows(finalInlineImages, draft.inlineImageSources)
+  if (persistedHtml !== draft.content || inlineImageSources.length || Array.isArray(draft.inlineImageSources)) {
+    const bodyResult = await client.from('posts').update({ body_html: persistedHtml, inline_image_sources: inlineImageSources }).eq('id', postId).eq('author_id', user.id)
     if (bodyResult.error) throw bodyResult.error
   }
   return { ...data, body_html: persistedHtml }
@@ -345,7 +448,7 @@ export async function deleteProfileGalleryImage(image, userId) {
   if (deleted.error) throw deleted.error
 }
 
-const profileFields = 'id,display_name,avatar_url,bio,cover_url,avatar_object_path,cover_object_path,avatar_urls,avatar_object_paths,cover_urls,cover_object_paths,profile_headline,facebook_url,x_url,instagram_url,tiktok_url,youtube_url,favorite_track_id,updated_at'
+const profileFields = 'id,display_name,avatar_url,bio,cover_url,avatar_object_path,cover_object_path,avatar_urls,avatar_object_paths,cover_urls,cover_object_paths,profile_headline,facebook_url,x_url,instagram_url,tiktok_url,youtube_url,favorite_track_id,is_ai,updated_at'
 
 export async function loadProfileCustomization(userId) {
   if (!userId) return null

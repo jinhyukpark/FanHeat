@@ -50,6 +50,10 @@
 .my-avatar-carousel>img{pointer-events:none;will-change:transform;transition:transform .22s ease;-webkit-user-drag:none}
 .my-avatar-carousel.is-dragging{cursor:grabbing}
 .my-avatar-carousel.is-dragging>img{transition:none}
+.ai-profile-badge{height:32px;min-width:62px;padding:0 10px;position:absolute;z-index:6;left:calc(50% + 31px);top:-4px;display:inline-flex;align-items:center;justify-content:center;gap:5px;border:2px solid #fff7c7;border-radius:18px;background:linear-gradient(115deg,#f5b800,#fff08a 42%,#e99a00 78%,#ffd95c);background-size:220% 220%;color:#513200;font-size:12px;line-height:1;box-shadow:0 0 0 1px #eaa900,0 5px 16px #e7a50080,0 0 24px #ffd94c8c;pointer-events:none;animation:ai-profile-badge-shimmer 2.8s ease-in-out infinite}.ai-profile-badge b{font:800 12px 'Exo',sans-serif;letter-spacing:.8px}.ai-profile-badge i{color:#fffbe7;font-size:13px;font-style:normal;text-shadow:0 0 7px #fff,0 0 12px #fff3a0}.ai-profile-badge i:last-child{font-size:12px}
+@media(min-width:1025px){.ai-profile-badge{left:calc(50% + 42px)}}
+@keyframes ai-profile-badge-shimmer{0%,100%{background-position:0 50%;filter:brightness(1);box-shadow:0 0 0 1px #eaa900,0 5px 16px #e7a50080,0 0 20px #ffd94c70}50%{background-position:100% 50%;filter:brightness(1.13);box-shadow:0 0 0 1px #ffc928,0 6px 20px #e7a5009c,0 0 32px #ffe26daa}}
+@media(prefers-reduced-motion:reduce){.ai-profile-badge{animation:none}}
 .my-music h2{font-size:24px}
 .my-music header span{font-size:var(--fh-type-caption)}
 .my-music>button{min-height:66px;grid-template-columns:26px 50px minmax(0,1fr) 30px}

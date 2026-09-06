@@ -5,6 +5,18 @@ const throwIfError = result => {
   return result.data
 }
 
+const optionalAdminHttpUrl = (value, fieldLabel) => {
+  const raw = String(value || '').trim()
+  if (!raw) return null
+  try {
+    const url = new URL(raw)
+    if (!['http:', 'https:'].includes(url.protocol)) throw new Error()
+    return url.href
+  } catch {
+    throw new Error(`${fieldLabel}은 http:// 또는 https:// 주소로 입력해 주세요.`)
+  }
+}
+
 export const isAdminUser = user => user?.app_metadata?.role === 'admin'
 
 export async function loadAdminDashboard() {
@@ -63,7 +75,7 @@ export async function deleteAdminMembers(ids) {
 }
 
 const albumTrackSelect = 'artist_album_tracks(id,album_id,track_number,title,duration_text,lyrics_excerpt,youtube_url,active,display_order,created_at,updated_at)'
-const artistDetailSelect = `id,slug,name,name_ko,image_url,description,active,review_pending,created_at,updated_at,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,tracks(count),award_entries(count),posts(count),artist_correction_requests(id,status),artist_albums(id,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,active,display_order,created_at,updated_at,${albumTrackSelect}),artist_gallery_items(id,title,image_url,source_page_url,original_image_url,source_collected_at,source_provider,creator_name,license_name,license_url,attribution_text,rights_verified_at,captured_on,active,display_order,created_at,updated_at),artist_fans(id,profile_id,display_name,handle,avatar_url,heat_percent,featured_rank,active,display_order,created_at,updated_at)`
+const artistDetailSelect = `id,slug,name,name_ko,image_url,description,active,review_pending,created_at,updated_at,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,tracks(count),award_entries(count),posts(count),artist_correction_requests(id,status),artist_albums(id,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,active,display_order,created_at,updated_at,${albumTrackSelect}),artist_gallery_items(id,title,image_url,source_page_url,original_image_url,source_collected_at,source_provider,creator_name,license_name,license_url,attribution_text,rights_verified_at,captured_on,active,display_order,ai_decision,ai_reason,ai_confidence,ai_category,ai_people_visible,ai_promotional_layout,review_status,reviewed_at,created_at,updated_at),artist_fans(id,profile_id,display_name,handle,avatar_url,heat_percent,featured_rank,active,display_order,created_at,updated_at)`
 
 export async function loadAdminArtists() {
   return throwIfError(await requireSupabase().from('artists').select(artistDetailSelect).order('created_at', { ascending: false }).order('id', { ascending: false }))
@@ -146,6 +158,17 @@ export async function setAdminAlbumVisibility(artistId, ids, active, includeTrac
   }))
 }
 
+export async function setAdminGalleryReview(artistId, ids, reviewStatus) {
+  if (!Array.isArray(ids) || !ids.length) return []
+  if (!['approved', 'rejected'].includes(reviewStatus)) throw new Error('지원하지 않는 갤러리 검토 상태입니다.')
+  return throwIfError(await requireSupabase().from('artist_gallery_items').update({
+    review_status: reviewStatus,
+    active: reviewStatus === 'approved',
+    reviewed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }).eq('artist_id', artistId).in('id', ids).select())
+}
+
 export async function deleteAdminArtistRelations(table, ids) {
   if (!relationPayloads[table]) throw new Error('지원하지 않는 아티스트 상세 유형입니다.')
   if (!Array.isArray(ids) || !ids.length) return []
@@ -180,13 +203,13 @@ export async function deleteAdminAlbumTrack(id) {
 }
 
 export async function loadAdminPosts() {
-  return throwIfError(await requireSupabase().from('posts').select('id,title,summary,body_html,tags,reference_url,audio_url,audio_title,audio_artist,artist_id,author_display_name,status,view_count,vote_count,created_at,published_at,updated_at,post_images(id,image_url,sort_order),comments(count)').order('created_at', { ascending: false }))
+  return throwIfError(await requireSupabase().from('posts').select('id,title,summary,body_html,tags,reference_url,source_label,source_url,source_links,inline_image_sources,audio_url,audio_title,audio_artist,artist_id,author_display_name,status,view_count,vote_count,created_at,published_at,updated_at,post_images(id,image_url,sort_order,source_label,source_url),comments(count)').order('created_at', { ascending: false }))
 }
 
 export async function loadAdminPostDetail(id) {
   const client = requireSupabase()
   const [post, comments] = await Promise.all([
-    client.from('posts').select('id,title,summary,body_html,tags,reference_url,audio_url,audio_title,audio_artist,artist_id,author_id,author_display_name,status,view_count,vote_count,created_at,published_at,updated_at,post_images(id,image_url,sort_order)').eq('id', id).single(),
+    client.from('posts').select('id,title,summary,body_html,tags,reference_url,source_label,source_url,source_links,inline_image_sources,audio_url,audio_title,audio_artist,artist_id,author_id,author_display_name,status,view_count,vote_count,created_at,published_at,updated_at,post_images(id,image_url,sort_order,source_label,source_url)').eq('id', id).single(),
     client.from('comments').select('id,post_id,parent_id,author_id,author_display_name,author_avatar_url,body,like_count,dislike_count,created_at,updated_at,deleted_at').eq('post_id', id).order('created_at'),
   ])
   if (post.error || comments.error) throw post.error || comments.error
@@ -194,12 +217,20 @@ export async function loadAdminPostDetail(id) {
 }
 
 export async function updateAdminPost(id, values) {
-  return throwIfError(await requireSupabase().from('posts').update({
+  const client = requireSupabase()
+  const imageSources = (values.post_images || []).map((image, index) => ({
+    id: image.id,
+    source_label: String(image.source_label || '').trim().slice(0, 120) || null,
+    source_url: optionalAdminHttpUrl(image.source_url, `${index + 1}번째 이미지 출처 URL`),
+  }))
+  const updatedPost = throwIfError(await client.from('posts').update({
     title: values.title.trim(),
     summary: values.summary?.trim() || '',
     body_html: values.body_html || '',
     tags: Array.isArray(values.tags) ? values.tags : String(values.tags || '').split(',').map(value => value.trim()).filter(Boolean),
     reference_url: values.reference_url?.trim() || null,
+    source_label: values.source_label?.trim() || null,
+    source_url: values.source_url?.trim() || null,
     audio_url: values.audio_url?.trim() || null,
     audio_title: values.audio_title?.trim() || null,
     audio_artist: values.audio_artist?.trim() || null,
@@ -208,6 +239,10 @@ export async function updateAdminPost(id, values) {
     published_at: values.published_at || null,
     updated_at: new Date().toISOString(),
   }).eq('id', id).select().single())
+  for (const image of imageSources) {
+    throwIfError(await client.from('post_images').update({ source_label: image.source_label, source_url: image.source_url }).eq('id', image.id).eq('post_id', id))
+  }
+  return updatedPost
 }
 
 export async function updateAdminPostStatus(id, status) {

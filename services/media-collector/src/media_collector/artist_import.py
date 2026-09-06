@@ -6,7 +6,7 @@ import socket
 import unicodedata
 from difflib import SequenceMatcher
 from html.parser import HTMLParser
-from urllib.parse import urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse
 
 import httpx
 from sqlalchemy import text
@@ -142,6 +142,16 @@ def _claim_values(entity: dict, property_id: str) -> list[str]:
     return values
 
 
+def _commons_source_url(entity: dict, artist_name: str) -> str:
+    category = next(iter(_claim_values(entity, "P373")), "")
+    title = entity.get("sitelinks", {}).get("commonswiki", {}).get("title", "")
+    if category:
+        return "https://commons.wikimedia.org/wiki/Category:" + quote(category.replace(" ", "_"), safe="()_-.")
+    if title:
+        return "https://commons.wikimedia.org/wiki/" + quote(title.replace(" ", "_"), safe=":()_-.")
+    return "https://commons.wikimedia.org/wiki/Special:MediaSearch?type=image&search=" + quote(artist_name)
+
+
 def search_artist_candidates(artist_name: str, language_code: str = "ko", timeout: float = 20) -> list[dict]:
     """Identity preview only: never creates a job or picks a result automatically."""
     language = language_code.split('-')[0]
@@ -155,7 +165,7 @@ def search_artist_candidates(artist_name: str, language_code: str = "ko", timeou
             return []
         response = client.get('https://www.wikidata.org/w/api.php', params={
             'action': 'wbgetentities', 'ids': '|'.join(h['id'] for h in hits),
-            'props': 'labels|descriptions|claims', 'languages': f'{language}|en', 'format': 'json'})
+            'props': 'labels|descriptions|claims|sitelinks', 'languages': f'{language}|en', 'sitefilter': 'commonswiki', 'format': 'json'})
         response.raise_for_status()
         entities = response.json().get('entities', {})
     candidates = []
@@ -176,6 +186,7 @@ def search_artist_candidates(artist_name: str, language_code: str = "ko", timeou
             'english_name': labels.get('en', {}).get('value'),
             'description': descriptions.get(language, {}).get('value') or descriptions.get('en', {}).get('value') or hit.get('description') or '설명 정보 없음',
             'entity_url': f"https://www.wikidata.org/wiki/{hit['id']}",
+            'commons_source_url': _commons_source_url(entity, artist_name),
             'official_source_urls': list(dict.fromkeys(urls))[:20]})
     return candidates
 
@@ -489,9 +500,12 @@ def import_artist(db: Session, request: dict) -> dict:
         report['missing'].append('기존 공개 데이터 보호 · 새 수집 결과는 근거 보고서에서 검토 필요')
         report['quality'] = 'partial'
         db.rollback()
+        gallery_count = save_gallery_candidates(db, row.id, gallery_review) if 'gallery' in scopes else 0
+        db.commit()
         logs.append('공개 중인 아티스트는 덮어쓰지 않고 수집 결과를 검토 보고서로 전달합니다.')
-        return {"artist_id": row.id, "slug": slug, "sources": len(pages), "gallery": 0,
-                "albums": len(albums), "tracks": track_total, "collected": 0, "report": report, "logs": list(logs)[-20:]}
+        logs.append(f'갤러리 확인 후보 {gallery_count}개를 슈퍼 관리자 검토함에 저장했습니다.')
+        return {"artist_id": row.id, "slug": slug, "sources": len(pages), "gallery": gallery_count,
+                "albums": len(albums), "tracks": track_total, "collected": gallery_count, "report": report, "logs": list(logs)[-20:]}
     values = {
         "slug": slug, "name": artist_name, "name_ko": artist_name,
         "description": descriptions[0] if descriptions and "biography" in scopes else None,

@@ -1,5 +1,7 @@
+import json
 from datetime import datetime, timezone
 from contextlib import contextmanager
+from types import SimpleNamespace
 
 from fanheat_ai.publication import PublicationService
 
@@ -13,6 +15,15 @@ class _FakeResult:
 
     def first(self):
         return self.row
+
+    def scalar_one_or_none(self):
+        return self.row
+
+    def scalars(self):
+        return self
+
+    def all(self):
+        return self.row or []
 
 
 class _FakeConnection:
@@ -33,10 +44,92 @@ class _FakeEngine:
     def begin(self):
         yield self.connection
 
+    @contextmanager
+    def connect(self):
+        yield self.connection
+
+
+def test_list_drafts_filters_source_before_limit_and_keeps_orphaned_personas():
+    engine = _FakeEngine([[{"id": "published-news", "status": "published"}]])
+    service = PublicationService(engine, None, None)
+
+    drafts = service.list_drafts("all", 1000, "news")
+
+    statement, parameters = engine.connection.statements[0]
+    assert drafts == [{"id": "published-news", "status": "published"}]
+    assert "left join ai_personas" in statement
+    assert "media.source = :source" in statement
+    assert "limit :limit" in statement
+    assert parameters["source"] == "news"
+    assert parameters["limit"] == 1000
+
 
 def test_plain_text_is_escaped_before_post_html():
     value = PublicationService._plain_text_html("첫 문단\n<script>alert(1)</script>")
     assert value == "<p>첫 문단</p><p>&lt;script&gt;alert(1)&lt;/script&gt;</p>"
+
+
+def test_news_thumbnail_is_added_to_published_post_when_preview_is_allowed():
+    source_media = {
+        "url": "https://news.example.com/articles/1",
+        "thumbnail_url": "https://cdn.example.com/image.jpg",
+        "source": "news",
+        "payload": {"fanheat_link_policy": {
+            "publisher": "뉴스 테스트",
+            "article_link_only": True,
+            "thumbnail_preview_allowed": True,
+            "thumbnail_origin": "open_graph",
+        }},
+    }
+    connection = _FakeConnection([source_media, None, None])
+    service = PublicationService(None, None, None)
+
+    service._insert_post(connection, {
+        "source_media_item_ids": ["media-id"],
+        "tags": [],
+        "profile_id": "profile-id",
+        "display_name": "작성자",
+        "title": "제목",
+        "body": "본문",
+    })
+
+    assert "insert into post_images" in connection.statements[-1][0]
+    assert connection.statements[-1][1]["image_url"] == "https://cdn.example.com/image.jpg"
+    assert connection.statements[-1][1]["source_label"] == "뉴스 테스트"
+    assert connection.statements[-1][1]["source_url"] == "https://news.example.com/articles/1"
+    post_parameters = connection.statements[-2][1]
+    assert post_parameters["source_label"] == "뉴스 테스트"
+    assert post_parameters["source_url"] == "https://news.example.com/articles/1"
+    assert json.loads(post_parameters["source_links"]) == [{
+        "label": "뉴스 테스트",
+        "url": "https://news.example.com/articles/1",
+    }]
+
+
+def test_news_thumbnail_is_not_added_without_explicit_preview_permission():
+    source_media = {
+        "url": "https://news.example.com/articles/1",
+        "thumbnail_url": "https://cdn.example.com/image.jpg",
+        "source": "news",
+        "payload": {"fanheat_link_policy": {
+            "article_link_only": True,
+            "thumbnail_preview_allowed": False,
+            "thumbnail_origin": "open_graph",
+        }},
+    }
+    connection = _FakeConnection([source_media, None])
+    service = PublicationService(None, None, None)
+
+    service._insert_post(connection, {
+        "source_media_item_ids": ["media-id"],
+        "tags": [],
+        "profile_id": "profile-id",
+        "display_name": "작성자",
+        "title": "제목",
+        "body": "본문",
+    })
+
+    assert all("insert into post_images" not in statement for statement, _ in connection.statements)
 
 
 def test_engagement_targets_stay_in_configured_range_and_scale_with_views():
@@ -78,6 +171,23 @@ def test_comment_auto_approval_respects_global_switch():
     assert PublicationService._comment_draft_status(True, [], 0.8) == "approved"
     assert PublicationService._comment_draft_status(True, ["risk"], 0.99) == "review"
     assert PublicationService._comment_draft_status(True, [], 0.79) == "review"
+
+
+def test_approved_posts_receive_non_uniform_publish_slots_in_configured_range():
+    latest = datetime.now(timezone.utc)
+    engine = _FakeEngine([None, latest, ["draft-one", "draft-two"], None, None])
+    settings = SimpleNamespace(post_publish_min_gap_minutes=8, post_publish_max_gap_minutes=26)
+    service = PublicationService(engine, None, settings)
+
+    with engine.begin() as connection:
+        scheduled = service._schedule_approved_posts(connection)
+
+    updates = [parameters for statement, parameters in engine.connection.statements if "set status = 'scheduled'" in statement]
+    first_gap = (updates[0]["scheduled_at"] - latest).total_seconds() / 60
+    second_gap = (updates[1]["scheduled_at"] - updates[0]["scheduled_at"]).total_seconds() / 60
+    assert scheduled == 2
+    assert 8 <= first_gap <= 26
+    assert 8 <= second_gap <= 26
 
 
 def test_assign_profile_reuses_an_eligible_ai_persona():

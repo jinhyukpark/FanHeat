@@ -59,7 +59,7 @@ Collector admin은 기본적으로 n8n과 같은 `N8N_USER`/`N8N_PASSWORD`를 �
 - `fanheat-admin-full-pipeline.json`: 관리자에서 YouTube/News `전체 자동화 실행` 시 현재 화면 설정으로 수집 후 소스별 AI 초안 생성
 - `fanheat-x-full-pipeline.json`: X 전용 관리자 수집·초안 생성. API 인증과 호출 제한을 다른 소스와 격리
 - `fanheat-youtube-scheduled-pipeline.json`: 매일 오전 8시, DB에 저장된 관리자 YouTube 검색어·국가·언어 설정을 읽어 수집 후 초안 생성
-- `fanheat-publish-approved.json`: 5분마다 관리자가 승인했거나 예약 시간이 된 게시물·댓글만 발행
+- `fanheat-publish-approved.json`: 1분마다 예약 시각을 확인하고, 자동 승인 포스트는 8~26분의 불규칙한 간격으로 한 건씩 발행
 - `fanheat-ai-comments.json`: 5분마다 AI 댓글·답글 계획을 확인하고, 예약 시간이 지난 작업만 처리
 - `fanheat-artist-profile-import.json`: 공식 프로필·SNS 근거, 앨범 상세·수록곡과 공식 YouTube 연결을 수집합니다. 작업 종료와 데이터 충족도를 별도로 보고합니다.
 - `fanheat-artist-scheduled-refresh.json`: 수집 완료 아티스트별 갱신 주기를 5분마다 확인하고, 갱신 시각이 된 아티스트만 공식 채널에서 다시 수집

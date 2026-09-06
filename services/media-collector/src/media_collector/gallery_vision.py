@@ -66,22 +66,39 @@ def classify_gallery(request, pages, settings, logs, extra_candidates=None):
 def save_gallery_candidates(db, artist_id, report):
     count=0
     for item in report.get('items',[]):
-        if item['decision']!='photo_candidate':
+        if item.get('decision') not in {'photo_candidate', 'review', 'exclude'} or not item.get('image_url'):
             continue
         existing=db.execute(text('select id from public.artist_gallery_items where artist_id=:id and image_url=:url'),
                             {'id':artist_id,'url':item['image_url']}).first()
+        params = {
+            'id': existing.id if existing else artist_id,
+            'url': item['image_url'],
+            'source': item.get('source_url'),
+            'original': item.get('original_image_url') or item['image_url'],
+            'collected_at': item.get('source_collected_at'),
+            'provider': item.get('source_provider'),
+            'creator': item.get('creator_name'),
+            'license': item.get('license_name'),
+            'license_url': item.get('license_url'),
+            'attribution': item.get('attribution_text'),
+            'verified': item.get('source_collected_at') if item.get('license_name') else None,
+            'decision': item['decision'],
+            'reason': item.get('reason'),
+            'confidence': item.get('confidence'),
+            'category': item.get('category'),
+            'people_visible': item.get('people_visible'),
+            'promotional_layout': item.get('promotional_layout'),
+        }
         if existing:
             # Fill missing provenance only; do not overwrite administrator edits.
-            db.execute(text('update public.artist_gallery_items set source_page_url=coalesce(source_page_url,:source), original_image_url=coalesce(original_image_url,:original), source_collected_at=coalesce(source_collected_at,:collected_at), source_provider=coalesce(source_provider,:provider), creator_name=coalesce(creator_name,:creator), license_name=coalesce(license_name,:license), license_url=coalesce(license_url,:license_url), attribution_text=coalesce(attribution_text,:attribution), rights_verified_at=coalesce(rights_verified_at,:verified) where id=:id'),
-                       {'id':existing.id, 'source':item.get('source_url'), 'original':item.get('original_image_url') or item['image_url'], 'collected_at':item.get('source_collected_at'), 'provider':item.get('source_provider'), 'creator':item.get('creator_name'), 'license':item.get('license_name'), 'license_url':item.get('license_url'), 'attribution':item.get('attribution_text'), 'verified':item.get('source_collected_at') if item.get('license_name') else None})
+            db.execute(text('update public.artist_gallery_items set source_page_url=coalesce(source_page_url,:source), original_image_url=coalesce(original_image_url,:original), source_collected_at=coalesce(source_collected_at,:collected_at), source_provider=coalesce(source_provider,:provider), creator_name=coalesce(creator_name,:creator), license_name=coalesce(license_name,:license), license_url=coalesce(license_url,:license_url), attribution_text=coalesce(attribution_text,:attribution), rights_verified_at=coalesce(rights_verified_at,:verified), ai_decision=:decision, ai_reason=:reason, ai_confidence=:confidence, ai_category=:category, ai_people_visible=:people_visible, ai_promotional_layout=:promotional_layout, review_status=case when active then \'approved\' when review_status in (\'approved\',\'rejected\') then review_status else \'pending\' end, updated_at=now() where id=:id'), params)
             continue
-        title = '재사용 허용 활동 사진 · 비전 검토 후보' if item.get('source_provider') == 'wikimedia_commons' else '공식 활동 사진 · 비전 검토 후보'
-        db.execute(text('insert into public.artist_gallery_items(artist_id,title,image_url,active,display_order,source_page_url,original_image_url,source_collected_at,source_provider,creator_name,license_name,license_url,attribution_text,rights_verified_at) values(:id,:title,:url,false,0,:source,:original,:collected_at,:provider,:creator,:license,:license_url,:attribution,:verified)'),
-                   {'id':artist_id,'title':title,'url':item['image_url'],
-                    'source':item.get('source_url'), 'original':item.get('original_image_url') or item['image_url'], 'collected_at':item.get('source_collected_at'),
-                    'provider':item.get('source_provider'), 'creator':item.get('creator_name'), 'license':item.get('license_name'),
-                    'license_url':item.get('license_url'), 'attribution':item.get('attribution_text'),
-                    'verified':item.get('source_collected_at') if item.get('license_name') else None})
+        title = {
+            'photo_candidate': '재사용 허용 활동 사진 · 확인 필요' if item.get('source_provider') == 'wikimedia_commons' else '공식 활동 사진 · 확인 필요',
+            'review': 'AI 판별 보류 이미지 · 확인 필요',
+            'exclude': 'AI 제외 권고 이미지 · 확인 필요',
+        }[item['decision']]
+        db.execute(text('insert into public.artist_gallery_items(artist_id,title,image_url,active,display_order,source_page_url,original_image_url,source_collected_at,source_provider,creator_name,license_name,license_url,attribution_text,rights_verified_at,ai_decision,ai_reason,ai_confidence,ai_category,ai_people_visible,ai_promotional_layout,review_status) values(:id,:title,:url,false,0,:source,:original,:collected_at,:provider,:creator,:license,:license_url,:attribution,:verified,:decision,:reason,:confidence,:category,:people_visible,:promotional_layout,\'pending\')'), params | {'title': title})
         count+=1
     return count
 

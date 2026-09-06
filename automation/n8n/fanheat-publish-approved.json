@@ -3,9 +3,9 @@
   "name": "FANHEAT publish approved AI content",
   "nodes": [
     {
-      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 5 }] } },
+      "parameters": { "rule": { "interval": [{ "field": "minutes", "minutesInterval": 1 }] } },
       "id": "schedule-publish",
-      "name": "Every 5 minutes",
+      "name": "Check due posts every minute",
       "type": "n8n-nodes-base.scheduleTrigger",
       "typeVersion": 1.2,
       "position": [0, 0]
@@ -29,7 +29,7 @@
     }
   ],
   "connections": {
-    "Every 5 minutes": { "main": [[{ "node": "Publish One Due Draft", "type": "main", "index": 0 }]] }
+    "Check due posts every minute": { "main": [[{ "node": "Publish One Due Draft", "type": "main", "index": 0 }]] }
   },
   "settings": { "executionOrder": "v1" },
   "active": true,

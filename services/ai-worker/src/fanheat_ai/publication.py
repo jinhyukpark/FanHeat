@@ -4,6 +4,7 @@ import math
 import random
 import uuid
 from datetime import datetime, timedelta, timezone
+from urllib.parse import urlparse
 
 from sqlalchemy import Engine, text
 
@@ -27,9 +28,33 @@ class PublicationService:
         self.llm = llm
         self.settings = settings
 
-    def list_drafts(self, status: str = "review", limit: int = 50) -> list[dict]:
+    def list_drafts(self, status: str = "review", limit: int = 50, source: str | None = None) -> list[dict]:
         with self.engine.connect() as connection:
-            status_filter = "" if status == "all" else "where d.status = :status"
+            conditions = []
+            if status != "all":
+                conditions.append("d.status = :status")
+            if source:
+                conditions.append(
+                    """
+                    (
+                        exists (
+                            select 1
+                            from unnest(d.source_media_item_ids) media_id
+                            join media_items media on media.id = media_id
+                            where media.source = :source
+                        )
+                        or exists (
+                            select 1
+                            from ai_content_drafts origin
+                            cross join lateral unnest(origin.source_media_item_ids) media_id
+                            join media_items media on media.id = media_id
+                            where origin.published_post_id = d.parent_post_id
+                              and media.source = :source
+                        )
+                    )
+                    """
+                )
+            where_clause = f"where {' and '.join(conditions)}" if conditions else ""
             rows = connection.execute(
                 text(
                     f"""
@@ -37,15 +62,15 @@ class PublicationService:
                            d.risk_flags, d.confidence, d.scheduled_at, d.created_at,
                            d.approval_source, d.reviewed_by, d.reviewed_at,
                            d.parent_post_id, d.parent_comment_id, d.source_media_item_ids, d.published_post_id,
-                           p.display_name as persona_name, p.profile_id
+                           coalesce(p.display_name, '프로필 미연결') as persona_name, p.profile_id
                     from ai_content_drafts d
-                    join ai_personas p on p.id = d.persona_id
-                    {status_filter}
+                    left join ai_personas p on p.id = d.persona_id
+                    {where_clause}
                     order by d.created_at desc
                     limit :limit
                     """
                 ),
-                {"status": status, "limit": limit},
+                {"status": status, "source": source, "limit": limit},
             ).mappings().all()
         return [dict(row) for row in rows]
 
@@ -248,9 +273,62 @@ class PublicationService:
             raise DraftStateError("draft not found or cannot be rejected")
         return dict(row)
 
+    def _schedule_approved_posts(self, connection) -> int:
+        """Give automatically published posts a natural, non-uniform cadence.
+
+        Explicit draft IDs are intentionally excluded by the caller so an
+        administrator's publish-now action remains immediate.
+        """
+        connection.execute(text("select pg_advisory_xact_lock(hashtextextended('fanheat-post-publish-queue', 0))"))
+        latest = connection.execute(
+            text(
+                """
+                select max(scheduled_at)
+                from ai_content_drafts
+                where content_type = 'post'
+                  and status = 'scheduled'
+                  and scheduled_at > now()
+                """
+            )
+        ).scalar_one_or_none()
+        draft_ids = connection.execute(
+            text(
+                """
+                select id
+                from ai_content_drafts
+                where content_type = 'post'
+                  and status = 'approved'
+                  and scheduled_at is null
+                order by created_at
+                for update
+                """
+            )
+        ).scalars().all()
+        if not draft_ids:
+            return 0
+
+        now = datetime.now(timezone.utc)
+        cursor = max(now, latest) if latest else now
+        minimum = self.settings.post_publish_min_gap_minutes
+        maximum = max(minimum, self.settings.post_publish_max_gap_minutes)
+        rng = random.SystemRandom()
+        for draft_id in draft_ids:
+            cursor += timedelta(minutes=rng.randint(minimum, maximum))
+            connection.execute(
+                text(
+                    """
+                    update ai_content_drafts
+                    set status = 'scheduled', scheduled_at = :scheduled_at, updated_at = now()
+                    where id = cast(:id as uuid)
+                    """
+                ),
+                {"id": draft_id, "scheduled_at": cursor},
+            )
+        return len(draft_ids)
+
     def publish_due(self, limit: int = 10, requested_draft_ids: list[str] | None = None) -> PublishResult:
         requested_count = len(set(requested_draft_ids or []))
-        with self.engine.connect() as connection:
+        with self.engine.begin() as connection:
             if requested_draft_ids:
                 draft_ids = connection.execute(
                     text(
@@ -267,6 +345,7 @@ class PublicationService:
                     {"draft_ids": requested_draft_ids, "limit": limit},
                 ).scalars().all()
             else:
+                self._schedule_approved_posts(connection)
                 draft_ids = connection.execute(
                     text(
                         """
@@ -434,17 +513,47 @@ class PublicationService:
         paragraphs = [part.strip() for part in value.splitlines() if part.strip()]
         return "".join(f"<p>{html.escape(part)}</p>" for part in paragraphs)
 
+    @staticmethod
+    def _allowed_news_thumbnail(source_media: dict | None) -> str | None:
+        if not source_media or source_media.get("source") != "news":
+            return None
+        thumbnail_url = str(source_media.get("thumbnail_url") or "").strip()
+        parsed = urlparse(thumbnail_url)
+        if parsed.scheme != "https" or not parsed.hostname:
+            return None
+        payload = source_media.get("payload") or {}
+        policy = payload.get("fanheat_link_policy") if isinstance(payload, dict) else None
+        if not isinstance(policy, dict):
+            return None
+        if policy.get("article_link_only") is not True or policy.get("thumbnail_preview_allowed") is not True:
+            return None
+        if policy.get("thumbnail_origin") not in {"open_graph", "rss", "news_api"}:
+            return None
+        return thumbnail_url
+
     def _insert_post(self, connection, draft: dict) -> str:
-        reference_url = connection.execute(
+        source_media = connection.execute(
             text(
                 """
-                select url from media_items
-                where id = any(cast(:source_ids as uuid[]))
-                order by published_at desc limit 1
+                select media.url, media.thumbnail_url, media.source, raw.payload
+                from media_items media
+                left join media_raw_items raw on raw.id = media.raw_item_id
+                where media.id = any(cast(:source_ids as uuid[]))
+                order by media.published_at desc
+                limit 1
                 """
             ),
             {"source_ids": draft["source_media_item_ids"]},
-        ).scalar()
+        ).mappings().first()
+        reference_url = source_media["url"] if source_media else None
+        source_payload = source_media.get("payload") if source_media else {}
+        source_policy = source_payload.get("fanheat_link_policy") if isinstance(source_payload, dict) else {}
+        source_label = (
+            str(source_policy.get("publisher") or "").strip()
+            if isinstance(source_policy, dict)
+            else ""
+        ) or (str(source_media.get("source") or "").strip().title() if source_media else None)
+        thumbnail_url = self._allowed_news_thumbnail(dict(source_media) if source_media else None)
         raw_tags = draft["tags"] if isinstance(draft["tags"], list) else json.loads(draft["tags"])
         tags = []
         seen_tags = set()
@@ -460,10 +569,11 @@ class PublicationService:
                 """
                 insert into posts (
                   id, author_id, author_display_name, title, summary, body_html, tags,
-                  reference_url, status, published_at, created_at, updated_at
+                  reference_url, source_label, source_url, source_links, status, published_at, created_at, updated_at
                 ) values (
                   cast(:id as uuid), :author_id, :display_name, :title, :summary, :body_html,
-                  cast(:tags as text[]), :reference_url, 'published', now(), now(), now()
+                  cast(:tags as text[]), :reference_url, :source_label, :source_url, cast(:source_links as jsonb),
+                  'published', now(), now(), now()
                 )
                 """
             ),
@@ -476,8 +586,24 @@ class PublicationService:
                 "body_html": self._plain_text_html(draft["body"]),
                 "tags": tags,
                 "reference_url": reference_url,
+                "source_label": source_label,
+                "source_url": reference_url,
+                "source_links": json.dumps(
+                    [{"label": source_label, "url": reference_url}] if reference_url else [],
+                    ensure_ascii=False,
+                ),
             },
         )
+        if thumbnail_url:
+            connection.execute(
+                text(
+                    """
+                    insert into post_images (post_id, image_url, sort_order, source_label, source_url)
+                    values (cast(:post_id as uuid), :image_url, 0, :source_label, :source_url)
+                    """
+                ),
+                {"post_id": post_id, "image_url": thumbnail_url, "source_label": source_label, "source_url": reference_url},
+            )
         return post_id
 
     @staticmethod

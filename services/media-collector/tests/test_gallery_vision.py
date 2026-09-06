@@ -60,14 +60,16 @@ def test_gallery_only_inserts_candidates_as_private_without_deletes():
             self.params.append(params)
             return SimpleNamespace(first=lambda:None)
     db=DB()
-    count=save_gallery_candidates(db,18,{'items':[{'decision':'exclude'},{'decision':'review'},
+    count=save_gallery_candidates(db,18,{'items':[{'decision':'exclude','image_url':'https://official.test/logo.jpg','reason':'logo'},
+        {'decision':'review','image_url':'https://official.test/check.jpg','reason':'unclear'},
         {'decision':'photo_candidate','image_url':'https://official.test/photo.jpg', 'source_url':'https://official.test/photos/1', 'source_collected_at':'2026-09-06T00:00:00Z'}]})
-    assert count==1
+    assert count==3
     assert 'false' in db.calls[-1]
     assert not any('delete' in q or 'update' in q for q in db.calls)
     assert db.params[-1]['source']=='https://official.test/photos/1'
     assert db.params[-1]['collected_at']=='2026-09-06T00:00:00Z'
     assert 'original_image_url' in db.calls[-1]
+    assert all("'pending'" in query for query in db.calls if 'insert into' in query)
 
 
 def test_recollection_fills_only_missing_provenance():

@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     prompt_version: str = "fanheat-v1"
     internal_api_key: str | None = None
     auto_approve_low_risk: bool = False
+    post_publish_min_gap_minutes: int = Field(default=8, ge=2, le=180)
+    post_publish_max_gap_minutes: int = Field(default=26, ge=2, le=360)
     comment_min_delay_minutes: int = Field(default=5, ge=1, le=1440)
     comment_max_delay_minutes: int = Field(default=30, ge=1, le=1440)
 

@@ -1,4 +1,4 @@
-import { setAdminAlbumVisibility } from './lib/admin-api'
+import { setAdminAlbumVisibility, setAdminGalleryReview } from './lib/admin-api'
 import AdminArtistImages from './AdminArtistImages'
 import { artistStatus, artistStatusLabels, pendingCorrectionCount, filterAdminArtists } from './lib/admin-artist-list'
 import AdminCorrectionRequests from './AdminCorrectionRequests'
@@ -24,6 +24,8 @@ import {
 const formatDate = value => value ? new Date(value).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }) : '-'
 const safeLower = value => String(value || '').toLocaleLowerCase('ko-KR')
 const parseLines = value => String(value || '').split('\n').map(item => item.trim()).filter(Boolean)
+const galleryDecisionLabels = { photo_candidate: '활동 사진 후보', review: 'AI 확인 보류', exclude: 'AI 제외 권고' }
+const galleryReviewLabels = { pending: '확인 필요', approved: '승인됨', rejected: '제외됨' }
 
 const relationConfig = {
   albums: {
@@ -54,6 +56,11 @@ function ArtistRelations({ artist, type, onRefresh }) {
   const [visibilityBusy, setVisibilityBusy] = useState(false)
   const [visibilityError, setVisibilityError] = useState('')
   const [includeTracks, setIncludeTracks] = useState(true)
+  const [galleryReviewBusy, setGalleryReviewBusy] = useState(false)
+  const [galleryReviewError, setGalleryReviewError] = useState('')
+  const [galleryReviewFilter, setGalleryReviewFilter] = useState('all')
+  const [galleryLicenseFilter, setGalleryLicenseFilter] = useState('all')
+  const [galleryProviderFilter, setGalleryProviderFilter] = useState('all')
   const changeVisibility = async (ids, active) => {
     if (visibilityBusy || !ids.length) return
     if (!window.confirm(`앨범 ${ids.length}개를 ${active ? '공개' : '비공개'}로 변경할까요?\n${includeTracks ? '해당 앨범의 모든 수록곡도 함께 변경됩니다.' : '수록곡의 개별 공개 설정은 유지됩니다.'}\n아티스트가 비공개이면 사용자 화면에는 노출되지 않습니다.`)) return
@@ -67,7 +74,26 @@ function ArtistRelations({ artist, type, onRefresh }) {
   const [previewing, setPreviewing] = useState(null)
   const [selectedIds, setSelectedIds] = useState(() => new Set())
   const [deletingSelected, setDeletingSelected] = useState(false)
-  const rows = [...(artist[config.rows] || [])].sort((a, b) => Number(a.display_order || 0) - Number(b.display_order || 0))
+  const allRows = [...(artist[config.rows] || [])].sort((a, b) => {
+    if (type === 'gallery') {
+      const reviewOrder = { pending: 0, approved: 1, rejected: 2 }
+      const statusDelta = (reviewOrder[a.review_status] ?? 3) - (reviewOrder[b.review_status] ?? 3)
+      if (statusDelta) return statusDelta
+    }
+    return Number(a.display_order || 0) - Number(b.display_order || 0)
+  })
+  const galleryLicenseOptions = type === 'gallery' ? [...new Set(allRows.map(item => String(item.license_name || '').trim() || '__missing__'))].sort((a, b) => a === '__missing__' ? 1 : b === '__missing__' ? -1 : a.localeCompare(b, 'ko')) : []
+  const galleryProviderOptions = type === 'gallery' ? [...new Set(allRows.map(item => String(item.source_provider || '').trim() || '__missing__'))].sort((a, b) => a === '__missing__' ? 1 : b === '__missing__' ? -1 : a.localeCompare(b, 'ko')) : []
+  const rows = type === 'gallery' ? allRows.filter(item => {
+    const reviewStatus = item.review_status || (item.active ? 'approved' : 'pending')
+    const license = String(item.license_name || '').trim() || '__missing__'
+    const provider = String(item.source_provider || '').trim() || '__missing__'
+    return (galleryReviewFilter === 'all' || reviewStatus === galleryReviewFilter)
+      && (galleryLicenseFilter === 'all' || license === galleryLicenseFilter)
+      && (galleryProviderFilter === 'all' || provider === galleryProviderFilter)
+  }) : allRows
+  const galleryCandidates = type === 'gallery' ? allRows.filter(item => item.ai_decision) : []
+  const pendingGalleryCount = galleryCandidates.filter(item => item.review_status === 'pending').length
   const selectedCount = rows.filter(item => selectedIds.has(item.id)).length
   const allSelected = rows.length > 0 && selectedCount === rows.length
   const save = async event => { event.preventDefault(); await saveAdminArtistRelation(config.table, artist.id, editing); setEditing(null); await onRefresh(`${config.title} 정보를 저장했습니다.`) }
@@ -86,11 +112,36 @@ function ArtistRelations({ artist, type, onRefresh }) {
       setDeletingSelected(false)
     }
   }
+  const reviewGallery = async (items, reviewStatus) => {
+    const ids = items.filter(item => item.review_status === 'pending').map(item => item.id)
+    if (!ids.length || galleryReviewBusy) return
+    const approving = reviewStatus === 'approved'
+    if (!window.confirm(approving
+      ? `선택한 이미지 후보 ${ids.length}개를 승인해 사용자 갤러리에 공개할까요?\n이미지와 출처·이용 권리를 확인한 뒤 진행해 주세요.`
+      : `선택한 이미지 후보 ${ids.length}개를 제외할까요?\n이미지는 사용자 페이지에 공개되지 않고 검토 기록은 유지됩니다.`)) return
+    setGalleryReviewBusy(true); setGalleryReviewError('')
+    try {
+      await setAdminGalleryReview(artist.id, ids, reviewStatus)
+      setSelectedIds(new Set())
+      await onRefresh(approving ? `이미지 후보 ${ids.length}개를 승인했습니다.` : `이미지 후보 ${ids.length}개를 제외했습니다.`)
+    } catch (error) {
+      setGalleryReviewError(error.message || '갤러리 검토 결과를 저장하지 못했습니다.')
+    } finally {
+      setGalleryReviewBusy(false)
+    }
+  }
   useEffect(() => {
     setSelectedIds(new Set())
     setEditing(null)
     setPreviewing(null)
+    setGalleryReviewFilter('all')
+    setGalleryLicenseFilter('all')
+    setGalleryProviderFilter('all')
   }, [type, artist.id])
+  useEffect(() => {
+    setSelectedIds(new Set())
+    setPreviewing(null)
+  }, [galleryReviewFilter, galleryLicenseFilter, galleryProviderFilter])
   const previewIndex = previewing ? rows.findIndex(item => item.id === previewing.id) : -1
   const showAdjacentPreview = direction => setPreviewing(current => {
     if (!current || rows.length < 2) return current
@@ -107,7 +158,39 @@ function ArtistRelations({ artist, type, onRefresh }) {
     document.addEventListener('keydown', navigatePreview)
     return () => document.removeEventListener('keydown', navigatePreview)
   }, [previewing?.id, rows.length])
-  return <section className="admin-detail-section"><header><div><small>ARTIST {type.toUpperCase()}</small><h3>{config.title} 관리</h3></div><button type="button" className="admin-add-button" onClick={() => setEditing({ ...config.empty })}>＋ {config.title} 추가</button></header>{type === 'albums' && <div className="admin-album-visibility"><label><input type="checkbox" checked={includeTracks} onChange={e => setIncludeTracks(e.target.checked)} /> 수록곡도 함께 공개·비공개 변경</label><p>체크하지 않으면 앨범만 변경됩니다. 비공개 수록곡과 연결 영상은 사용자에게 표시되지 않습니다.</p>{visibilityError && <p role="alert">{visibilityError}</p>}</div>}{rows.length > 0 && <div className="admin-relation-selection"><label><input type="checkbox" checked={allSelected} onChange={toggleAll} /> 전체 선택</label><span>{selectedCount}개 선택</span>{type === 'albums' && <><button type="button" disabled={!selectedCount || visibilityBusy || deletingSelected} onClick={() => changeVisibility(rows.filter(r => selectedIds.has(r.id)).map(r => r.id), true)}>선택 공개</button><button type="button" disabled={!selectedCount || visibilityBusy || deletingSelected} onClick={() => changeVisibility(rows.filter(r => selectedIds.has(r.id)).map(r => r.id), false)}>선택 비공개</button></>}<button type="button" disabled={!selectedCount || deletingSelected} onClick={removeSelected}>{deletingSelected ? '삭제 중…' : '선택 삭제'}</button></div>}<div className="admin-relation-list">{rows.map(item => <article className={`admin-relation-item ${type} ${selectedIds.has(item.id) ? 'selected' : ''}`} key={item.id}><label className="admin-relation-checkbox"><input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelected(item.id)} aria-label={`${item.title || item.display_name} 선택`} /></label>{type === 'gallery' ? <button type="button" className="admin-gallery-preview-trigger" onClick={() => setPreviewing(item)} aria-label={`${item.title} 이미지 크게 보기`}><img src={item.image_url || '/images/icon_member.png'} alt="" /><span>미리보기</span></button> : type !== 'fans' && <img src={item.cover_url || '/images/icon_member.png'} alt="" />}<div><strong>{item.title || item.display_name}</strong><span>{config.summary(item)}</span><small>{item.active ? '사용자 페이지 공개' : '비공개'} · 순서 {item.display_order}</small>{type === 'gallery' && <AdminGallerySource item={item} />}</div>{type === 'albums' && <button type="button" disabled={visibilityBusy || deletingSelected} onClick={() => changeVisibility([item.id], !item.active)}>{item.active ? '비공개로 변경' : '공개로 변경'}</button>}{type === 'albums' && <a className="admin-relation-detail" href={`/admin/artists/${artist.id}/albums/${item.id}`}>상세·수록곡</a>}<button type="button" onClick={() => setEditing({ ...config.empty, ...item })}>수정</button>{type !== 'albums' && <button type="button" className="danger" onClick={() => remove(item)}>삭제</button>}</article>)}{!rows.length && <p className="admin-empty">Supabase에 등록된 {config.title} 정보가 없습니다.</p>}</div>{editing && <form className="admin-inline-editor" onSubmit={save}><header><strong>{editing.id ? `${config.title} 수정` : `${config.title} 추가`}</strong><button type="button" onClick={() => setEditing(null)}>×</button></header><RelationFields type={type} value={editing} setValue={setEditing} /><label className="admin-check"><input type="checkbox" checked={editing.active} onChange={event => setEditing({ ...editing, active: event.target.checked })} /> 사용자 페이지에 공개</label><button className="admin-primary">저장</button></form>}{previewing && <div className="admin-gallery-preview-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setPreviewing(null) }}><section className="admin-gallery-preview" role="dialog" aria-modal="true" aria-labelledby="admin-gallery-preview-title"><header><div><small>GALLERY PREVIEW <b>{previewIndex + 1} / {rows.length}</b></small><h3 id="admin-gallery-preview-title">{previewing.title}</h3><p>{previewing.captured_on || '날짜 미정'} · {previewing.active ? '사용자 페이지 공개' : '비공개'} · 순서 {previewing.display_order}</p></div><button type="button" onClick={() => setPreviewing(null)} aria-label="미리보기 닫기">×</button></header><AdminGallerySource item={previewing} /><div className="admin-gallery-preview-canvas">{rows.length > 1 && <button type="button" className="admin-gallery-carousel-button previous" onClick={() => showAdjacentPreview(-1)} aria-label="이전 이미지">‹</button>}<img key={previewing.id} src={previewing.image_url} alt={`${previewing.title} 미리보기`} />{rows.length > 1 && <button type="button" className="admin-gallery-carousel-button next" onClick={() => showAdjacentPreview(1)} aria-label="다음 이미지">›</button>}</div><footer><span>← → 방향키로 이동</span><a href={previewing.image_url} target="_blank" rel="noreferrer">원본 이미지 새 창에서 보기 ↗</a></footer></section></div>}</section>
+  return <section className="admin-detail-section">
+    <header><div><small>ARTIST {type.toUpperCase()}</small><h3>{config.title} 관리</h3></div><button type="button" className="admin-add-button" onClick={() => setEditing({ ...config.empty })}>＋ {config.title} 추가</button></header>
+    {type === 'albums' && <div className="admin-album-visibility"><label><input type="checkbox" checked={includeTracks} onChange={e => setIncludeTracks(e.target.checked)} /> 수록곡도 함께 공개·비공개 변경</label><p>체크하지 않으면 앨범만 변경됩니다. 비공개 수록곡과 연결 영상은 사용자에게 표시되지 않습니다.</p>{visibilityError && <p role="alert">{visibilityError}</p>}</div>}
+    {type === 'gallery' && galleryCandidates.length > 0 && <div className="admin-gallery-review-summary">
+      <div><strong>AI 이미지 후보 검토</strong><p>판별된 모든 이미지를 확인한 뒤 승인하거나 제외해 주세요. 승인 전에는 사용자 페이지에 표시되지 않습니다.</p></div>
+      <dl><div><dt>확인 필요</dt><dd>{pendingGalleryCount}</dd></div><div><dt>승인</dt><dd>{galleryCandidates.filter(item => item.review_status === 'approved').length}</dd></div><div><dt>제외</dt><dd>{galleryCandidates.filter(item => item.review_status === 'rejected').length}</dd></div></dl>
+    </div>}
+    {type === 'gallery' && allRows.length > 0 && <div className="admin-gallery-filters" aria-label="갤러리 필터">
+      <label><span>검토 상태</span><select value={galleryReviewFilter} onChange={event => setGalleryReviewFilter(event.target.value)}><option value="all">전체 상태</option><option value="pending">확인 필요</option><option value="approved">승인됨</option><option value="rejected">제외됨</option></select></label>
+      <label><span>라이선스 조건</span><select value={galleryLicenseFilter} onChange={event => setGalleryLicenseFilter(event.target.value)}><option value="all">전체 라이선스</option>{galleryLicenseOptions.map(value => <option value={value} key={value}>{value === '__missing__' ? '미기록' : value}</option>)}</select></label>
+      <label><span>제공처</span><select value={galleryProviderFilter} onChange={event => setGalleryProviderFilter(event.target.value)}><option value="all">전체 제공처</option>{galleryProviderOptions.map(value => <option value={value} key={value}>{value === '__missing__' ? '미기록' : value}</option>)}</select></label>
+      <div><strong>{rows.length.toLocaleString()}개</strong><span>/ 전체 {allRows.length.toLocaleString()}개</span><button type="button" disabled={galleryReviewFilter === 'all' && galleryLicenseFilter === 'all' && galleryProviderFilter === 'all'} onClick={() => { setGalleryReviewFilter('all'); setGalleryLicenseFilter('all'); setGalleryProviderFilter('all') }}>필터 초기화</button></div>
+    </div>}
+    {galleryReviewError && <p className="admin-gallery-review-error" role="alert">{galleryReviewError}</p>}
+    {rows.length > 0 && <div className="admin-relation-selection"><label><input type="checkbox" checked={allSelected} onChange={toggleAll} /> 전체 선택</label><span>{selectedCount}개 선택</span>
+      {type === 'albums' && <><button type="button" disabled={!selectedCount || visibilityBusy || deletingSelected} onClick={() => changeVisibility(rows.filter(r => selectedIds.has(r.id)).map(r => r.id), true)}>선택 공개</button><button type="button" disabled={!selectedCount || visibilityBusy || deletingSelected} onClick={() => changeVisibility(rows.filter(r => selectedIds.has(r.id)).map(r => r.id), false)}>선택 비공개</button></>}
+      {type === 'gallery' && <><button type="button" disabled={galleryReviewBusy || !rows.some(item => selectedIds.has(item.id) && item.review_status === 'pending')} onClick={() => reviewGallery(rows.filter(item => selectedIds.has(item.id)), 'approved')}>선택 승인</button><button type="button" disabled={galleryReviewBusy || !rows.some(item => selectedIds.has(item.id) && item.review_status === 'pending')} onClick={() => reviewGallery(rows.filter(item => selectedIds.has(item.id)), 'rejected')}>선택 제외</button></>}
+      <button type="button" disabled={!selectedCount || deletingSelected || galleryReviewBusy} onClick={removeSelected}>{deletingSelected ? '삭제 중…' : '선택 삭제'}</button>
+    </div>}
+    <div className="admin-relation-list">{rows.map(item => <article className={`admin-relation-item ${type} review-${item.review_status || 'manual'} ${selectedIds.has(item.id) ? 'selected' : ''}`} key={item.id}>
+      <label className="admin-relation-checkbox"><input type="checkbox" checked={selectedIds.has(item.id)} onChange={() => toggleSelected(item.id)} aria-label={`${item.title || item.display_name} 선택`} /></label>
+      {type === 'gallery' ? <button type="button" className="admin-gallery-preview-trigger" onClick={() => setPreviewing(item)} aria-label={`${item.title} 이미지 크게 보기`}><img src={item.image_url || '/images/icon_member.png'} alt="" /><span>미리보기</span></button> : type !== 'fans' && <img src={item.cover_url || '/images/icon_member.png'} alt="" />}
+      <div><strong>{item.title || item.display_name}</strong><span>{config.summary(item)}</span><small>{item.active ? '사용자 페이지 공개' : '비공개'} · 순서 {item.display_order}</small>
+        {type === 'gallery' && item.ai_decision && <div className="admin-gallery-ai-review"><span className={`status-${item.review_status || 'pending'}`}>{galleryReviewLabels[item.review_status] || '확인 필요'}</span><b>{galleryDecisionLabels[item.ai_decision] || item.ai_decision}</b>{item.ai_confidence != null && <small>신뢰도 {Math.round(Number(item.ai_confidence) * 100)}%</small>}{item.ai_category && <small>분류 {item.ai_category}</small>}{item.ai_reason && <p>{item.ai_reason}</p>}</div>}
+        {type === 'gallery' && <AdminGallerySource item={item} />}
+      </div>
+      {type === 'albums' && <button type="button" disabled={visibilityBusy || deletingSelected} onClick={() => changeVisibility([item.id], !item.active)}>{item.active ? '비공개로 변경' : '공개로 변경'}</button>}
+      {type === 'albums' && <a className="admin-relation-detail" href={`/admin/artists/${artist.id}/albums/${item.id}`}>상세·수록곡</a>}
+      {type === 'gallery' ? <div className="admin-gallery-review-actions">{item.review_status === 'pending' && <><button type="button" disabled={galleryReviewBusy} onClick={() => reviewGallery([item], 'approved')}>승인</button><button type="button" className="reject" disabled={galleryReviewBusy} onClick={() => reviewGallery([item], 'rejected')}>제외</button></>}<button type="button" onClick={() => setEditing({ ...config.empty, ...item })}>수정</button><button type="button" className="danger" onClick={() => remove(item)}>삭제</button></div> : <><button type="button" onClick={() => setEditing({ ...config.empty, ...item })}>수정</button>{type !== 'albums' && <button type="button" className="danger" onClick={() => remove(item)}>삭제</button>}</>}
+    </article>)}{!rows.length && <p className="admin-empty">{type === 'gallery' && allRows.length ? '선택한 필터에 해당하는 갤러리 이미지가 없습니다.' : `Supabase에 등록된 ${config.title} 정보가 없습니다.`}</p>}</div>
+    {editing && <form className="admin-inline-editor" onSubmit={save}><header><strong>{editing.id ? `${config.title} 수정` : `${config.title} 추가`}</strong><button type="button" onClick={() => setEditing(null)}>×</button></header><RelationFields type={type} value={editing} setValue={setEditing} />{type === 'gallery' && editing.ai_decision ? <p className="admin-gallery-edit-review-note">AI 수집 후보의 공개 여부는 목록의 승인·제외 버튼으로 변경해 주세요.</p> : <label className="admin-check"><input type="checkbox" checked={editing.active} onChange={event => setEditing({ ...editing, active: event.target.checked })} /> 사용자 페이지에 공개</label>}<button className="admin-primary">저장</button></form>}
+    {previewing && <div className="admin-gallery-preview-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setPreviewing(null) }}><section className="admin-gallery-preview" role="dialog" aria-modal="true" aria-labelledby="admin-gallery-preview-title"><header><div><small>GALLERY PREVIEW <b>{previewIndex + 1} / {rows.length}</b></small><h3 id="admin-gallery-preview-title">{previewing.title}</h3><p>{previewing.captured_on || '날짜 미정'} · {galleryReviewLabels[previewing.review_status] || (previewing.active ? '사용자 페이지 공개' : '비공개')} · 순서 {previewing.display_order}</p>{previewing.ai_reason && <p className="admin-gallery-preview-reason">{galleryDecisionLabels[previewing.ai_decision]} · {previewing.ai_reason}</p>}</div><button type="button" onClick={() => setPreviewing(null)} aria-label="미리보기 닫기">×</button></header><AdminGallerySource item={previewing} /><div className="admin-gallery-preview-canvas">{rows.length > 1 && <button type="button" className="admin-gallery-carousel-button previous" onClick={() => showAdjacentPreview(-1)} aria-label="이전 이미지">‹</button>}<img key={previewing.id} src={previewing.image_url} alt={`${previewing.title} 미리보기`} />{rows.length > 1 && <button type="button" className="admin-gallery-carousel-button next" onClick={() => showAdjacentPreview(1)} aria-label="다음 이미지">›</button>}</div><footer><span>← → 방향키로 이동</span><a href={previewing.image_url} target="_blank" rel="noreferrer">원본 이미지 새 창에서 보기 ↗</a></footer></section></div>}
+  </section>
 }
 
 export function ArtistDetailPage({ initial, onChanged }) {
@@ -198,9 +281,14 @@ function PostDetail({ initial, artists, onClose, onChanged }) {
   const [notice, setNotice] = useState('')
   const refresh = async message => { const next = await loadAdminPostDetail(post.id); setPost(next); setNotice(message); onChanged() }
   const update = (key, value) => setPost(current => ({ ...current, [key]: value }))
+  const updateImageSource = (id, changes) => setPost(current => ({
+    ...current,
+    post_images: (current.post_images || []).map(image => image.id === id ? { ...image, ...changes } : image),
+  }))
   const save = async event => { event.preventDefault(); await updateAdminPost(post.id, post); await refresh('포스트 전체 내용을 저장했습니다.') }
   const roots = post.comments.filter(comment => !comment.parent_id || !post.comments.some(parent => parent.id === comment.parent_id))
-  return <div className="admin-modal-backdrop admin-detail-backdrop"><section className="admin-modal admin-entity-detail post-admin-detail"><header><div><small>POST DETAIL</small><h2>{post.title}</h2></div><button type="button" onClick={onClose}>×</button></header>{notice && <p className="admin-alert">{notice}</p>}<form className="admin-profile-editor" onSubmit={save}><div className="admin-form-columns"><label>제목<input value={post.title} onChange={event => update('title', event.target.value)} required /></label><label>아티스트<select value={post.artist_id || ''} onChange={event => update('artist_id', event.target.value)}><option value="">연결 안 함</option>{artists.map(artist => <option value={artist.id} key={artist.id}>{artist.name_ko || artist.name}</option>)}</select></label></div><label>한 줄 내용<textarea className="short" value={post.summary || ''} onChange={event => update('summary', event.target.value)} /></label><label>본문 HTML<textarea className="post-body-editor" value={post.body_html || ''} onChange={event => update('body_html', event.target.value)} /></label><div className="admin-form-columns"><label>태그 <small>쉼표로 구분</small><input value={(post.tags || []).join(', ')} onChange={event => update('tags', event.target.value.split(',').map(value => value.trim()).filter(Boolean))} /></label><label>참조 URL<input value={post.reference_url || ''} onChange={event => update('reference_url', event.target.value)} /></label><label>음원 제목<input value={post.audio_title || ''} onChange={event => update('audio_title', event.target.value)} /></label><label>음원 아티스트<input value={post.audio_artist || ''} onChange={event => update('audio_artist', event.target.value)} /></label><label>음원 URL<input value={post.audio_url || ''} onChange={event => update('audio_url', event.target.value)} /></label><label>상태<select value={post.status} onChange={event => update('status', event.target.value)}><option value="published">공개</option><option value="draft">임시저장</option><option value="archived">숨김</option></select></label></div><div className="admin-post-media"><strong>첨부 미디어 {post.post_images?.length || 0}개</strong>{[...(post.post_images || [])].sort((a,b) => a.sort_order - b.sort_order).map(image => <a href={image.image_url} target="_blank" rel="noreferrer" key={image.id}>{image.sort_order + 1}. {image.image_url}</a>)}</div><button className="admin-primary">포스트 저장</button></form><section className="admin-post-comments"><header><div><small>COMMENTS</small><h3>포스트 댓글 관리</h3></div><span>{post.comments.filter(comment => !comment.deleted_at).length}개</span></header>{roots.map(comment => <CommentNode key={comment.id} comment={comment} rows={post.comments} onChanged={refresh} />)}{!roots.length && <p className="admin-empty">등록된 댓글이 없습니다.</p>}</section></section></div>
+  const sortedImages = [...(post.post_images || [])].sort((a, b) => a.sort_order - b.sort_order)
+  return <div className="admin-modal-backdrop admin-detail-backdrop"><section className="admin-modal admin-entity-detail post-admin-detail"><header><div><small>POST DETAIL</small><h2>{post.title}</h2></div><button type="button" onClick={onClose}>×</button></header>{notice && <p className="admin-alert">{notice}</p>}<form className="admin-profile-editor" onSubmit={save}><div className="admin-form-columns"><label>제목<input value={post.title} onChange={event => update('title', event.target.value)} required /></label><label>아티스트<select value={post.artist_id || ''} onChange={event => update('artist_id', event.target.value)}><option value="">연결 안 함</option>{artists.map(artist => <option value={artist.id} key={artist.id}>{artist.name_ko || artist.name}</option>)}</select></label></div><label>한 줄 내용<textarea className="short" value={post.summary || ''} onChange={event => update('summary', event.target.value)} /></label><label>본문 HTML<textarea className="post-body-editor" value={post.body_html || ''} onChange={event => update('body_html', event.target.value)} /></label><div className="admin-form-columns"><label>태그 <small>쉼표로 구분</small><input value={(post.tags || []).join(', ')} onChange={event => update('tags', event.target.value.split(',').map(value => value.trim()).filter(Boolean))} /></label><label>참조 URL<input value={post.reference_url || ''} onChange={event => update('reference_url', event.target.value)} /></label><label>출처명<input value={post.source_label || ''} onChange={event => update('source_label', event.target.value)} /></label><label>출처 원문 URL<input value={post.source_url || ''} onChange={event => update('source_url', event.target.value)} /></label><label>음원 제목<input value={post.audio_title || ''} onChange={event => update('audio_title', event.target.value)} /></label><label>음원 아티스트<input value={post.audio_artist || ''} onChange={event => update('audio_artist', event.target.value)} /></label><label>음원 URL<input value={post.audio_url || ''} onChange={event => update('audio_url', event.target.value)} /></label><label>상태<select value={post.status} onChange={event => update('status', event.target.value)}><option value="published">공개</option><option value="draft">임시저장</option><option value="archived">숨김</option></select></label></div><div className="admin-post-media"><header><div><strong>첨부 이미지 {sortedImages.length}개</strong><small>각 이미지의 원본 페이지를 선택적으로 등록할 수 있습니다.</small></div></header>{sortedImages.map((image, index) => { const sourceOpen = Boolean(image._sourceOpen || image.source_url || image.source_label); return <article key={image.id}><a className="admin-post-media-preview" href={image.image_url} target="_blank" rel="noreferrer"><img src={image.image_url} alt="" /><span>{index + 1}번 이미지 보기</span></a><div><strong>{index + 1}번 이미지</strong>{image.source_label && <small>{image.source_label}</small>}</div>{sourceOpen ? <><label><span>출처 URL <small>선택</small></span><input type="url" value={image.source_url || ''} onChange={event => updateImageSource(image.id, { source_url: event.target.value, _sourceOpen: true })} placeholder="https:// 원본 페이지 주소" /></label><button className="admin-image-source-remove" type="button" onClick={() => updateImageSource(image.id, { source_url: '', source_label: '', _sourceOpen: false })}>출처 제거</button></> : <button className="admin-image-source-add" type="button" onClick={() => updateImageSource(image.id, { _sourceOpen: true })}>+ 출처 등록</button>}</article>})}</div><button className="admin-primary">포스트 저장</button></form><section className="admin-post-comments"><header><div><small>COMMENTS</small><h3>포스트 댓글 관리</h3></div><span>{post.comments.filter(comment => !comment.deleted_at).length}개</span></header>{roots.map(comment => <CommentNode key={comment.id} comment={comment} rows={post.comments} onChanged={refresh} />)}{!roots.length && <p className="admin-empty">등록된 댓글이 없습니다.</p>}</section></section></div>
 }
 
 export function PostsPanel({ rows, artists, onReload }) {

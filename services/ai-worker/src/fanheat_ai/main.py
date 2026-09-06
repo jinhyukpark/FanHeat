@@ -98,10 +98,12 @@ def run_pipeline(request: PipelineRequest) -> PipelineResult:
 
 
 @app.get("/v1/drafts", dependencies=[Depends(require_internal_api_key)])
-def list_drafts(status: str = "review", limit: int = 50) -> list[dict]:
+def list_drafts(status: str = "review", limit: int = 50, source: str | None = None) -> list[dict]:
     if status not in {"all", "generated", "review", "approved", "scheduled", "published", "rejected", "failed"}:
         raise HTTPException(status_code=400, detail="invalid draft status")
-    return app.state.publication.list_drafts(status, min(max(limit, 1), 100))
+    if source is not None and source not in {"youtube", "news", "x"}:
+        raise HTTPException(status_code=400, detail="invalid source")
+    return app.state.publication.list_drafts(status, min(max(limit, 1), 1000), source)
 
 
 @app.delete("/v1/drafts/{draft_id}", dependencies=[Depends(require_internal_api_key)])
