@@ -446,12 +446,8 @@
 .detail-shell .post-detail::-webkit-scrollbar-track,.detail-shell .post-detail::-webkit-scrollbar-thumb,.detail-shell .post-detail.is-scrolling::-webkit-scrollbar-thumb{border:0;background:transparent}
 
 /* Detail pages are standalone on tablet/mobile; the feed must not continue below them. */
+.detail-mobile-header{display:none}
 .detail-list-back{display:none}
-@media(max-width:700px){
-  .detail-list-back{width:auto;height:28px;margin:0 0 5px;padding:0 5px 0 0;display:inline-flex;align-items:center;gap:4px;border:0;border-radius:0;background:transparent;color:#fff;font-size:12px;font-weight:500;line-height:1;opacity:.9;cursor:pointer}
-  .detail-list-back svg{width:17px;height:17px;fill:none;stroke:currentColor;stroke-width:1.35;stroke-linecap:round;stroke-linejoin:round}
-  .detail-list-back:hover,.detail-list-back:focus-visible{background:transparent;color:#fff;opacity:1;outline:1px solid #ffffff99;outline-offset:3px;transform:none}
-}
 .detail-post-navigation{margin:0 0 68px;padding-top:18px;display:grid;grid-template-columns:1fr 1fr;gap:10px;border-top:1px solid #dedbe2}
 .detail-post-navigation button{min-width:0;min-height:70px;padding:12px 14px;display:flex;align-items:center;gap:10px;border:1px solid #ddd8e4;border-radius:10px;background:#fff;color:#48424d;text-align:left}
 .detail-post-navigation button:last-child{justify-content:flex-end;text-align:right}

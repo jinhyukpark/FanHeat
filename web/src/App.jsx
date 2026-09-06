@@ -2015,8 +2015,12 @@ function PostDetail({ post, onClose, user, onLogin, onEdit, previousPost, nextPo
     return next
   })
   return <section className={`post-detail ${isScrolling ? 'is-scrolling' : ''}`} onScroll={revealScrollbar}>
+    <header className="detail-mobile-header">
+      <button className="detail-list-back" type="button" onClick={onClose} aria-label="게시글 목록으로 돌아가기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5-7 7 7 7M7 12h12" /></svg><span>뒤로</span></button>
+      <strong title={localizeTitle(post.title) || '게시글 상세'}>{localizeTitle(post.title) || '게시글 상세'}</strong>
+      <span className="detail-mobile-header-spacer" aria-hidden="true" />
+    </header>
     <div className="detail-hero">
-      <button className="detail-list-back" type="button" onClick={onClose} aria-label="게시글 목록으로 돌아가기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5-7 7 7 7M7 12h12" /></svg><span>목록으로</span></button>
       <div className="detail-meta"><div className="detail-date-actions"><time dateTime={publishedAt || undefined}>{publishedLabel}</time>{isOwner && <button type="button" onClick={() => onEdit(post)}>수정하기</button>}<button className={`detail-bookmark-button ${bookmarked ? 'active' : ''}`} type="button" onClick={toggleBookmark} disabled={bookmarkPending} aria-label={bookmarked ? '북마크 해제' : '북마크 추가'} aria-pressed={bookmarked} title={bookmarked ? '마이페이지 북마크에 저장됨' : '마이페이지 북마크에 저장'}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 4.5A1.5 1.5 0 0 1 7.5 3h9A1.5 1.5 0 0 1 18 4.5V21l-6-4-6 4V4.5Z" /></svg></button></div><span className="detail-gift-pending"><img src={`${A}gift_icon.png`} alt="선물" /><b>준비 중</b></span><span className={`detail-heat-count heat-${heatTier}`}><i className="detail-heat-star" aria-hidden="true" /><b>{heatCount.toLocaleString()}건</b></span></div>
       {post.title && <h1>{localizeTitle(post.title)}</h1>}
       {post.data?.summary && <p>{post.data.summary}</p>}
