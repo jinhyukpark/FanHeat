@@ -13,7 +13,7 @@ from zoneinfo import ZoneInfo
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
-from pydantic import BaseModel, Field, HttpUrl, field_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
@@ -122,11 +122,23 @@ class AdminCollectionRequest(BaseModel):
     max_results: int = Field(default=15, ge=1, le=100)
     order: CollectionOrder = CollectionOrder.VIEW_COUNT
     published_within_hours: int | None = Field(default=24, ge=1, le=24 * 30)
+    published_from: date | None = None
+    published_to: date | None = None
     region_code: str = Field(default="KR", pattern=r"^[A-Z]{2}$")
     language_code: str = Field(default="ko", pattern=r"^[A-Za-z]{2,3}(-[A-Za-z]{2,8})?$")
     language_filter_mode: LanguageFilterMode = LanguageFilterMode.STRICT
     collection_date: date | None = None
     news_sources: list[NewsSourceSetting] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode="after")
+    def validate_news_date_range(self) -> "AdminCollectionRequest":
+        if self.source != Source.NEWS:
+            return self
+        if (self.published_from is None) != (self.published_to is None):
+            raise ValueError("뉴스 수집 시작일과 종료일을 모두 입력하세요")
+        if self.published_from and self.published_to and self.published_from > self.published_to:
+            raise ValueError("뉴스 수집 시작일은 종료일보다 늦을 수 없습니다")
+        return self
 
 
 class SavedQueriesRequest(BaseModel):
@@ -790,9 +802,7 @@ def start_collection(request: AdminCollectionRequest, db: Session = Depends(get_
     queries = normalize_queries(request.queries)
     if not queries:
         raise HTTPException(status_code=422, detail="검색어를 하나 이상 입력하세요")
-    published_after = None
-    if request.published_within_hours is not None:
-        published_after = datetime.now(timezone.utc) - timedelta(hours=request.published_within_hours)
+    published_after, published_before = collection_window(request)
     locale = db.get(CollectorSettings, True)
     if locale is None:
         locale = CollectorSettings(singleton=True)
@@ -811,6 +821,7 @@ def start_collection(request: AdminCollectionRequest, db: Session = Depends(get_
             max_results=request.max_results,
             order=request.order,
             published_after=published_after,
+            published_before=published_before,
             region_code=request.region_code,
             language_code=request.language_code,
             language_filter_mode=request.language_filter_mode,
@@ -1052,7 +1063,12 @@ def run_full_automation(request: AdminCollectionRequest, db: Session = Depends(g
     locale.language_filter_mode = request.language_filter_mode.value
     db.commit()
     settings = get_settings()
-    payload = request.model_dump(mode="json") | {"queries": queries}
+    published_after, published_before = collection_window(request)
+    payload = request.model_dump(mode="json") | {
+        "queries": queries,
+        "published_after": published_after.isoformat() if published_after else None,
+        "published_before": published_before.isoformat() if published_before else None,
+    }
     try:
         webhook_url = settings.n8n_x_webhook_url if request.source == Source.X else settings.n8n_webhook_url
         response = httpx.post(
@@ -1259,6 +1275,23 @@ def normalize_queries(queries: list[str]) -> list[str]:
     return normalized
 
 
+def collection_window(request: AdminCollectionRequest) -> tuple[datetime | None, datetime | None]:
+    """Return a UTC half-open publication window for one collection request.
+
+    News dates are entered as inclusive Korean calendar dates. Internally the
+    end is the next midnight so articles published at any time on the selected
+    end date are included.
+    """
+    if request.source == Source.NEWS and request.published_from and request.published_to:
+        korean_time = ZoneInfo("Asia/Seoul")
+        published_after = datetime.combine(request.published_from, datetime_time.min, korean_time)
+        published_before = datetime.combine(request.published_to + timedelta(days=1), datetime_time.min, korean_time)
+        return published_after.astimezone(timezone.utc), published_before.astimezone(timezone.utc)
+    if request.published_within_hours is not None:
+        return datetime.now(timezone.utc) - timedelta(hours=request.published_within_hours), None
+    return None, None
+
+
 def command_preview(request: AdminCollectionRequest, queries: list[str]) -> str:
     import json
 
@@ -1269,7 +1302,11 @@ def command_preview(request: AdminCollectionRequest, queries: list[str]) -> str:
                 "language_filter_mode": request.language_filter_mode.value}
         if request.source == Source.NEWS:
             body["news_sources"] = [source.model_dump(mode="json") for source in request.news_sources]
-        if request.published_within_hours is not None:
+        published_after, published_before = collection_window(request)
+        if request.source == Source.NEWS and request.published_from and request.published_to:
+            body["published_after"] = published_after.isoformat()
+            body["published_before"] = published_before.isoformat()
+        elif request.published_within_hours is not None:
             body["published_after"] = f"<UTC now - {request.published_within_hours} hours>"
         encoded = json.dumps(body, ensure_ascii=False)
         commands.append(
@@ -1511,7 +1548,7 @@ ADMIN_HTML = """<!doctype html>
     label{font-size:13px;color:var(--muted);font-weight:700}input,select,button{font:inherit;font-size:14px;border-radius:9px}input,select{width:100%;min-height:44px;padding:11px 12px;background-color:#101219;color:var(--text);border:1px solid var(--line);outline:none}input:focus,select:focus{border-color:#6d7890;box-shadow:0 0 0 2px #6d789033}select{appearance:none;-webkit-appearance:none;padding-right:44px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='8' viewBox='0 0 14 8'%3E%3Cpath d='M1 1l6 6 6-6' fill='none' stroke='%23c7cdd8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 16px center;background-size:14px 8px;cursor:pointer}select::-ms-expand{display:none}
     .tagbox{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-height:48px;padding:8px;background:#101219;border:1px solid var(--line);border-radius:9px}.tagbox:focus-within{border-color:#626b7d}.tagbox #tags{display:contents}.tag{display:inline-flex;align-items:center;gap:7px;background:#2c3140;border:1px solid #444b5d;border-radius:999px;padding:6px 8px 6px 11px;font-size:14px}.tag button{background:transparent;color:#c9cfda;padding:0 3px;font-size:16px;line-height:1}.tagbox input{flex:1;min-width:180px;padding:6px;border:0;background:transparent;outline:0}
     .x-drive-settings{grid-column:1/-1;display:grid;gap:7px;padding:14px;border:1px solid #3f6c5a;border-radius:10px;background:#16352955}.x-drive-settings[hidden],.direct-search-setting[hidden],.news-source-settings[hidden]{display:none!important}.x-drive-settings strong{font-size:14px;color:var(--ok)}.x-drive-settings span{font-size:13px;color:#d4ddd9}.x-drive-settings code{overflow-wrap:anywhere;color:#a7d8c2;font-size:12px}
-    .news-source-settings{grid-column:1/-1;display:grid;gap:10px;padding:14px;border:1px solid #3e526f;border-radius:10px;background:#101722}.news-source-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.news-source-head strong{display:block;font-size:14px}.news-source-head span,.news-source-note{display:block;color:var(--muted);font-size:12px}.news-source-head button,.news-source-actions button{min-height:36px;padding:7px 10px}.news-source-list{display:grid;gap:9px}.news-source-row{display:grid;grid-template-columns:minmax(110px,.7fr) minmax(150px,1fr);gap:8px;padding:11px;border:1px solid #343d4d;border-radius:9px;background:#151a22}.news-source-row .rss{grid-column:1/-1}.news-source-row input[type=text],.news-source-row input[type=url]{min-height:40px}.news-source-checks{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px 16px}.news-source-checks label{display:flex;align-items:center;gap:7px;color:#dce2ed;font-size:12px}.news-source-checks input{width:17px;height:17px;min-height:0;accent-color:#8b6cff}.news-source-remove{justify-self:end;min-height:32px;padding:5px 9px;background:#452432;color:#ffb2c0}.news-source-actions{display:flex;justify-content:flex-end}.news-source-empty{padding:12px;border:1px dashed #414858;border-radius:8px;color:var(--muted);font-size:12px;text-align:center}
+    .news-date-range{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;border:1px solid #3e526f;border-radius:10px;background:#101722}.news-date-range[hidden]{display:none!important}.news-date-range .field{margin:0}.news-date-range p{grid-column:1/-1;margin:0;color:var(--muted);font-size:12px}.news-source-settings{grid-column:1/-1;display:grid;gap:10px;padding:14px;border:1px solid #3e526f;border-radius:10px;background:#101722}.news-source-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.news-source-head strong{display:block;font-size:14px}.news-source-head span,.news-source-note{display:block;color:var(--muted);font-size:12px}.news-source-head button,.news-source-actions button{min-height:36px;padding:7px 10px}.news-source-list{display:grid;gap:9px}.news-source-row{display:grid;grid-template-columns:minmax(110px,.7fr) minmax(150px,1fr);gap:8px;padding:11px;border:1px solid #343d4d;border-radius:9px;background:#151a22}.news-source-row .rss{grid-column:1/-1}.news-source-row input[type=text],.news-source-row input[type=url]{min-height:40px}.news-source-checks{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px 16px}.news-source-checks label{display:flex;align-items:center;gap:7px;color:#dce2ed;font-size:12px}.news-source-checks input{width:17px;height:17px;min-height:0;accent-color:#8b6cff}.news-source-remove{justify-self:end;min-height:32px;padding:5px 9px;background:#452432;color:#ffb2c0}.news-source-actions{display:flex;justify-content:flex-end}.news-source-empty{padding:12px;border:1px dashed #414858;border-radius:8px;color:var(--muted);font-size:12px;text-align:center}
     button{border:0;background:var(--hot);color:white;font-weight:800;padding:12px 22px;cursor:pointer}button:disabled{opacity:.35;cursor:not-allowed;filter:saturate(.25);box-shadow:none!important}.actions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:18px}.actions .secondary{background:#343a48}
     pre{white-space:pre-wrap;word-break:break-word;background:#101219;border:1px solid var(--line);padding:14px;border-radius:10px;color:#dce2ed;font-size:12px;min-height:72px}
     .status{padding:14px;border-radius:10px;background:#101219;border:1px solid var(--line)}.status strong{color:var(--warn)}.status.done strong{color:var(--ok)}.status.failed strong{color:var(--hot)}
@@ -1557,7 +1594,8 @@ ADMIN_HTML = """<!doctype html>
         <div class="field direct-search-setting"><label for="language">우선 언어</label><select id="language"><option value="ko">한국어</option><option value="ja">일본어</option><option value="en">영어</option><option value="zh-Hant">중국어(번체)</option><option value="id">인도네시아어</option><option value="th">태국어</option><option value="vi">베트남어</option><option value="pt">포르투갈어</option><option value="es">스페인어</option><option value="de">독일어</option><option value="fr">프랑스어</option></select></div>
         <div class="field direct-search-setting"><label for="language-filter-mode">언어 적용 방식</label><select id="language-filter-mode"><option value="strict">선택 언어만 · 공식 K-POP 채널 예외</option><option value="prefer">선택 언어 우선 · 해외 콘텐츠 허용</option></select></div>
         <div class="field direct-search-setting"><label for="order">정렬</label><select id="order"><option value="viewCount">조회수</option><option value="date">최신순</option><option value="relevance">관련도</option></select></div>
-        <div class="field direct-search-setting"><label for="hours">최근 몇 시간</label><input id="hours" type="number" min="1" max="720" value="24"></div>
+        <div class="field direct-search-setting relative-time-setting"><label for="hours">최근 몇 시간</label><input id="hours" type="number" min="1" max="720" value="24"></div>
+        <div id="news-date-range" class="news-date-range" hidden><div class="field"><label for="news-date-start">뉴스 수집 시작일</label><input id="news-date-start" type="date" required></div><div class="field"><label for="news-date-end">뉴스 수집 종료일</label><input id="news-date-end" type="date" required></div><p>한국 시간 기준이며 종료일에 발행된 기사까지 포함합니다. 기본값은 최근 7일입니다.</p></div>
         <section id="news-source-settings" class="news-source-settings" hidden><div class="news-source-head"><div><strong>수집 허용 언론사</strong><span>한 곳 이상 등록하면 기사 원문 도메인이 일치하는 언론사만 수집합니다.</span></div><button id="add-news-source" type="button" class="secondary">+ 언론사 추가</button></div><div id="news-source-list" class="news-source-list"></div><p class="news-source-note">기사 이미지는 복제하지 않습니다. ‘RSS/API·OpenGraph 썸네일 허용’을 켠 언론사는 RSS가 없어도 기사 원문의 OG 이미지를 링크 카드 미리보기로 사용할 수 있습니다.</p><div class="news-source-actions"><button id="save-news-sources" type="button" class="secondary">언론사 설정 저장</button></div></section>
       </div></section><section id="ai-settings-panel" class="setup-tab-panel" role="tabpanel" aria-labelledby="ai-settings-tab" hidden><div class="grid">
         <div class="settings-heading"><strong>AI 콘텐츠 작성 설정</strong><span>새로 생성하는 초안부터 적용됩니다.</span></div>
@@ -1605,19 +1643,25 @@ sourceMenu.addEventListener('keydown',event=>{const options=[...sourceMenu.query
 document.addEventListener('click',event=>{if(!sourcePicker.contains(event.target))setSourceMenuOpen(false)});
 function inferLogSource(log){const text=`${log.command||''} ${log.type||''}`.toLowerCase();if(/(?:\"source\"\\s*:\\s*\"x\"|\\bx 전용\\b)/.test(text))return'x';if(/\"source\"\\s*:\\s*\"news\"/.test(text))return'news';return'youtube'}
 const savedSource=localStorage.getItem('fanheat-collector-source');if(savedSource&&sourceLabels[savedSource])$('source').value=savedSource;
+function initializeNewsDateRange(){const end=new Date(),start=new Date();start.setDate(start.getDate()-6);let saved={};try{saved=JSON.parse(localStorage.getItem('fanheat-news-collection-range')||'{}')}catch{}$('news-date-start').value=saved.start||localDateValue(start);$('news-date-end').value=saved.end||localDateValue(end)}
+initializeNewsDateRange();
 let newsSources=[];
 function newsSourcePayload(){return newsSources.map(source=>({name:String(source.name||'').trim(),domains:String(source.domains||'').split(',').map(value=>value.trim().toLowerCase().replace(/^www[.]/,'')).filter(Boolean),source_url:String(source.source_url||'').trim()||null,rss_url:String(source.rss_url||'').trim()||null,enabled:source.enabled!==false,allow_thumbnail_preview:Boolean(source.allow_thumbnail_preview)})).filter(source=>source.name&&source.domains.length)}
 function renderNewsSources(){const list=$('news-source-list');list.innerHTML=newsSources.length?newsSources.map((source,index)=>`<article class="news-source-row" data-news-index="${index}"><input type="text" data-news-field="name" value="${esc(source.name||'')}" placeholder="언론사명" aria-label="언론사명"><input type="text" data-news-field="domains" value="${esc(Array.isArray(source.domains)?source.domains.join(', '):source.domains||'')}" placeholder="도메인 (예: example.com)" aria-label="허용 도메인"><input class="rss" type="url" data-news-field="source_url" value="${esc(source.source_url||'')}" placeholder="뉴스 목록·연예 섹션 HTTPS 주소 (OpenGraph 수집 시작점)" aria-label="OpenGraph 수집 시작 주소"><input class="rss" type="url" data-news-field="rss_url" value="${esc(source.rss_url||'')}" placeholder="RSS HTTPS 주소 (선택)" aria-label="RSS 주소"><div class="news-source-checks"><label><input type="checkbox" data-news-field="enabled" ${source.enabled!==false?'checked':''}> 수집 사용</label><label><input type="checkbox" data-news-field="allow_thumbnail_preview" ${source.allow_thumbnail_preview?'checked':''}> RSS/API·OpenGraph 썸네일 허용</label></div><button type="button" class="news-source-remove" data-remove-news-source="${index}" aria-label="${esc(source.name||'언론사')} 삭제">× 삭제</button></article>`).join(''):'<div class="news-source-empty">등록 전에는 서버에 설정된 기존 News/RSS 소스를 사용합니다. 언론사를 추가하면 허용 목록 방식으로 전환됩니다.</div>';preview()}
 $('add-news-source').addEventListener('click',()=>{newsSources.push({name:'',domains:'',source_url:'',rss_url:'',enabled:true,allow_thumbnail_preview:false});renderNewsSources();$('news-source-list').querySelector('[data-news-index]:last-child input')?.focus()});
 $('news-source-list').addEventListener('input',event=>{const row=event.target.closest('[data-news-index]'),field=event.target.dataset.newsField;if(!row||!field)return;const source=newsSources[Number(row.dataset.newsIndex)];source[field]=event.target.type==='checkbox'?event.target.checked:event.target.value;preview()});
 $('news-source-list').addEventListener('click',event=>{const button=event.target.closest('[data-remove-news-source]');if(!button)return;newsSources.splice(Number(button.dataset.removeNewsSource),1);renderNewsSources()});
-function updateSourceContext(){const source=currentSource(),label=sourceLabels[source]||source,isX=source==='x',isNews=source==='news';syncSourcePicker();$('media-tab-label').textContent=isX?'최근 수집 X 포스트':isNews?'최근 수집 뉴스':'최근 수집 YouTube 미디어';$('reload-media').textContent=isX?'X 포스트 새로고침':isNews?'뉴스 새로고침':'미디어 새로고침';document.querySelectorAll('.direct-search-setting').forEach(field=>field.hidden=isX);$('x-drive-settings').hidden=!isX;$('news-source-settings').hidden=!isNews;[$('job-source-label'),$('console-source-label')].forEach(item=>{item.textContent=label;item.classList.toggle('x',isX)});localStorage.setItem('fanheat-collector-source',source)}
+function updateSourceContext(){const source=currentSource(),label=sourceLabels[source]||source,isX=source==='x',isNews=source==='news';syncSourcePicker();$('media-tab-label').textContent=isX?'최근 수집 X 포스트':isNews?'최근 수집 뉴스':'최근 수집 YouTube 미디어';$('reload-media').textContent=isX?'X 포스트 새로고침':isNews?'뉴스 새로고침':'미디어 새로고침';document.querySelectorAll('.direct-search-setting').forEach(field=>field.hidden=isX);document.querySelectorAll('.relative-time-setting').forEach(field=>field.hidden=isX||isNews);$('x-drive-settings').hidden=!isX;$('news-date-range').hidden=!isNews;$('news-source-settings').hidden=!isNews;[$('job-source-label'),$('console-source-label')].forEach(item=>{item.textContent=label;item.classList.toggle('x',isX)});localStorage.setItem('fanheat-collector-source',source)}
 function updateSourceCapability(){const source=currentSource(),capability=sourceCapabilities[source]||{},ready=capability.configured!==false,warning=$('source-warning'),notice=capability.notice||'';warning.hidden=ready&&!notice;warning.textContent=!ready?`${sourceLabels[source]} 수집 연결이 준비되지 않았습니다.`:notice;if(!ready){$('run').disabled=true;$('run-all').disabled=true}else if(!aiPipelineRunning){$('run').disabled=false;$('run-all').disabled=false}}
 async function loadSourceCapabilities(){sourceCapabilities=await api('/admin/api/source-capabilities');updateSourceCapability()}
 updateSourceContext();
-function payload(){const source=$('source').value,collectionDate=$('filter-end')?.value||localDateValue(new Date());if(source==='x')return{source,queries:[],collection_date:collectionDate};return{source,queries:[...tags],max_results:Number($('max').value),order:$('order').value,published_within_hours:$('hours').value?Number($('hours').value):null,region_code:$('region').value,language_code:$('language').value,language_filter_mode:$('language-filter-mode').value,news_sources:source==='news'?newsSourcePayload():[]}}
-function preview(){const p=payload(), body={source:p.source,query:p.query,max_results:p.max_results,order:p.order};if(p.published_within_hours)body.published_after=`<UTC now - ${p.published_within_hours} hours>`;$('command').textContent=`curl -X POST http://localhost:8080/v1/collections \\\n  -H 'X-FANHEAT-API-KEY: $FANHEAT_INTERNAL_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '${JSON.stringify(body)}'`}
+function payload(){const source=$('source').value,collectionDate=$('filter-end')?.value||localDateValue(new Date()),isNews=source==='news';if(source==='x')return{source,queries:[],collection_date:collectionDate};return{source,queries:[...tags],max_results:Number($('max').value),order:$('order').value,published_within_hours:isNews?null:($('hours').value?Number($('hours').value):null),published_from:isNews?$('news-date-start').value:null,published_to:isNews?$('news-date-end').value:null,region_code:$('region').value,language_code:$('language').value,language_filter_mode:$('language-filter-mode').value,news_sources:isNews?newsSourcePayload():[]}}
+function collectionWindowPreview(p){if(p.source==='news'&&p.published_from&&p.published_to){const endExclusive=new Date(new Date(`${p.published_to}T00:00:00+09:00`).getTime()+86400000);return{published_after:new Date(`${p.published_from}T00:00:00+09:00`).toISOString(),published_before:endExclusive.toISOString()}}if(p.published_within_hours)return{published_after:`<UTC now - ${p.published_within_hours} hours>`};return{}}
+function preview(){const p=payload(), body={source:p.source,query:p.query,max_results:p.max_results,order:p.order,...collectionWindowPreview(p)};$('command').textContent=`curl -X POST http://localhost:8080/v1/collections \\\n  -H 'X-FANHEAT-API-KEY: $FANHEAT_INTERNAL_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '${JSON.stringify(body)}'`}
 document.querySelectorAll('input,select').forEach(el=>el.addEventListener('input',preview));preview();
+$('news-date-start').addEventListener('change',saveNewsCollectionRange);$('news-date-end').addEventListener('change',saveNewsCollectionRange);
+function saveNewsCollectionRange(){localStorage.setItem('fanheat-news-collection-range',JSON.stringify({start:$('news-date-start').value,end:$('news-date-end').value}));preview()}
+function validateCollectionRange(){if(currentSource()!=='news')return true;const start=$('news-date-start').value,end=$('news-date-end').value;if(!start||!end){$('status').className='status failed';$('status').textContent='뉴스 수집 시작일과 종료일을 모두 입력하세요.';return false}if(start>end){$('status').className='status failed';$('status').textContent='뉴스 수집 시작일은 종료일보다 늦을 수 없습니다.';return false}saveNewsCollectionRange();return true}
 function renderTags(){$('tags').innerHTML=tags.map((tag,index)=>`<span class="tag">${esc(tag)}<button type="button" data-index="${index}" aria-label="${esc(tag)} 삭제">×</button></span>`).join('');preview()}
 async function saveTags(){await api(`/admin/api/queries/${$('source').value}`,{method:'PUT',body:JSON.stringify({queries:tags})})}
 async function loadTags(){const data=await api(`/admin/api/queries/${$('source').value}`);tags=data.queries;renderTags()}
@@ -1631,7 +1675,7 @@ $('tags').addEventListener('click',e=>{const button=e.target.closest('button[dat
 $('source').addEventListener('change',async()=>{updateSourceContext();updateSourceCapability();selectedMedia.clear();updateMediaSelection();activateWorkbenchPane('media-pane');preview();renderCommandDock();try{await Promise.all([loadTags(),loadJobs(),loadMedia(),loadDrafts()])}catch(e){$('status').textContent=e.message}});
 function saveCommandLogs(){commandLogs=commandLogs.slice(0,50);localStorage.setItem('fanheat-command-logs',JSON.stringify(commandLogs));renderCommandDock()}
 function updateCommandLog(id,updates){const log=commandLogs.find(item=>item.id===id);if(log)Object.assign(log,updates,{updated_at:new Date().toISOString()});saveCommandLogs()}
-function multiPreview(){const p=payload();if(p.source==='x'){commandPreview=`Google Drive 날짜 폴더 확인 → ${p.collection_date}\\nGoogle Sheet → FANHEAT_X_KPOP_후보_${p.collection_date}\\nX 포스트 DB 반영`;renderCommandDock();return}commandPreview=p.queries.map(query=>{const body={source:p.source,query,max_results:p.max_results,order:p.order,region_code:p.region_code,language_code:p.language_code,language_filter_mode:p.language_filter_mode};if(p.source==='news')body.news_sources=p.news_sources;if(p.published_within_hours)body.published_after=`<UTC now - ${p.published_within_hours} hours>`;return `curl -X POST http://localhost:8080/v1/collections -H 'X-FANHEAT-API-KEY: $FANHEAT_INTERNAL_API_KEY' -H 'Content-Type: application/json' -d '${JSON.stringify(body)}'`}).join('\\n\\n');renderCommandDock()}
+function multiPreview(){const p=payload();if(p.source==='x'){commandPreview=`Google Drive 날짜 폴더 확인 → ${p.collection_date}\\nGoogle Sheet → FANHEAT_X_KPOP_후보_${p.collection_date}\\nX 포스트 DB 반영`;renderCommandDock();return}commandPreview=p.queries.map(query=>{const body={source:p.source,query,max_results:p.max_results,order:p.order,region_code:p.region_code,language_code:p.language_code,language_filter_mode:p.language_filter_mode,...collectionWindowPreview(p)};if(p.source==='news')body.news_sources=p.news_sources;return `curl -X POST http://localhost:8080/v1/collections -H 'X-FANHEAT-API-KEY: $FANHEAT_INTERNAL_API_KEY' -H 'Content-Type: application/json' -d '${JSON.stringify(body)}'`}).join('\\n\\n');renderCommandDock()}
 const buildCommandPreview=multiPreview;preview=()=>{previewGeneratedAt=new Date().toISOString();buildCommandPreview();commandPreview=`[생성 ${new Date(previewGeneratedAt).toLocaleString()}]\n${commandPreview}`;renderCommandDock()};preview();
 $('clear-command-log').addEventListener('click',()=>{const source=currentSource(),count=commandLogs.filter(log=>log.source===source).length;if(count&&!confirm(`${sourceLabels[source]} 실행 기록 ${count}개를 지울까요?`))return;commandLogs=commandLogs.filter(log=>log.source!==source);saveCommandLogs()});
 async function api(url,opts={}){const r=await fetch(url,{...opts,headers:{'Content-Type':'application/json',...(opts.headers||{})}});if(r.status===401){location.href='/admin/login';throw new Error('로그인이 만료되었습니다.')}let data;try{data=await r.json()}catch{data={detail:'HTTP '+r.status}}if(!r.ok){const error=new Error(typeof data.detail==='string'?data.detail:'HTTP '+r.status);error.status=r.status;error.payload=data;throw error}return data}
@@ -1699,7 +1743,7 @@ $('select-all-drafts').addEventListener('click',()=>{const select=selectedDrafts
 async function runBulk(action){const ids=[...selectedDrafts];if(!ids.length)return;let reason='';if(action==='reject'){reason=await requestRejectionReason(ids.length);if(!reason)return}if(action==='delete'&&!confirm(`선택한 ${ids.length}개 초안을 삭제할까요? 발행 완료 초안은 보호됩니다.`))return;const button=$(action==='approve'?'bulk-approve':action==='reject'?'bulk-reject':'bulk-delete');button.disabled=true;$('ai-result').textContent=`${ids.length}개 처리 중…`;const results=await Promise.allSettled(ids.map(id=>api(`/admin/api/ai/drafts/${id}${action==='approve'?'/approve':action==='reject'?'/reject':''}`,{method:action==='delete'?'DELETE':'POST',...(action==='reject'?{body:JSON.stringify({reason})}:action==='approve'?{body:JSON.stringify({approval_source:'admin_bulk'})}:{body:'{}'})})));const failed=results.filter(r=>r.status==='rejected').length;await loadDrafts();$('status').className=`status ${failed?'failed':'done'}`;$('status').textContent=`선택 초안 ${ids.length-failed}개 처리 완료${failed?` · ${failed}개 실패`:''}`}
 $('bulk-approve').addEventListener('click',()=>runBulk('approve'));$('bulk-reject').addEventListener('click',()=>runBulk('reject'));$('bulk-delete').addEventListener('click',()=>runBulk('delete'));
 $('bulk-publish').addEventListener('click',()=>{const ids=[...selectedDrafts];if(ids.length&&confirm(`선택한 승인 초안 ${ids.length}개를 FANHEAT 사용자 피드에 게시할까요?`))publishDrafts(ids,$('bulk-publish'))});
-$('form').addEventListener('submit',async e=>{e.preventDefault();const isX=currentSource()==='x';if(!isX&&!tags.length){$('status').className='status failed';$('status').textContent='검색어 태그를 하나 이상 추가하세요.';return}includeTodayInFilter();$('run').disabled=true;$('status').textContent=isX?'Google Drive에서 X 포스트를 가져오는 중입니다…':`${tags.length}개 작업을 등록하는 중입니다…`;const logId=addCommandLog('수집만 실행',commandPreview);try{if(!isX)await Promise.all([saveTags(),saveLocale()]);const result=await api('/admin/api/collections',{method:'POST',body:JSON.stringify(payload())});updateCommandLog(logId,{status:'접수됨',response:`HTTP 202\n${result.message||`job_ids: ${(result.job_ids||[]).join(', ')}`}`});if(isX){$('status').className='status done';$('status').textContent=result.message;setTimeout(()=>Promise.all([loadJobs(),loadMedia()]),5000);$('run').disabled=false}else poll(result.job_ids,logId)}catch(err){$('status').className='status failed';$('status').textContent=err.message;updateCommandLog(logId,{status:'요청 실패',response:err.message,error:err.message});$('run').disabled=false}});loadTags().catch(e=>$('status').textContent=e.message);loadLocale().catch(e=>$('status').textContent=e.message);loadJobs();
-$('run-all').addEventListener('click',async()=>{const isX=currentSource()==='x';if(!isX&&!tags.length){$('status').className='status failed';$('status').textContent='검색어 태그를 하나 이상 추가하세요.';return}includeTodayInFilter();const button=$('run-all');button.disabled=true;$('status').className='status';$('status').textContent=isX?'Google Sheet X 포스트 수집 및 AI 초안을 요청하는 중입니다…':'n8n 전체 자동화를 요청하는 중입니다…';const logId=addCommandLog('n8n 전체 자동화',`POST /admin/api/automation\n${JSON.stringify(payload(),null,2)}`);try{if(!isX)await Promise.all([saveTags(),saveLocale()]);const result=await api('/admin/api/automation',{method:'POST',body:JSON.stringify(payload())});$('status').className='status done';$('status').innerHTML=`<strong>n8n 실행 요청 완료</strong> · ${esc(result.message)}`;updateCommandLog(logId,{status:'n8n 접수됨',response:`HTTP 202\n${result.message}`});setTimeout(()=>{loadJobs();loadMedia();loadDrafts()},6000)}catch(err){$('status').className='status failed';$('status').textContent=err.message;updateCommandLog(logId,{status:'요청 실패',response:err.message,error:err.message})}finally{button.disabled=false}});
+$('form').addEventListener('submit',async e=>{e.preventDefault();const isX=currentSource()==='x';if(!isX&&!tags.length){$('status').className='status failed';$('status').textContent='검색어 태그를 하나 이상 추가하세요.';return}if(!validateCollectionRange())return;includeTodayInFilter();$('run').disabled=true;$('status').textContent=isX?'Google Drive에서 X 포스트를 가져오는 중입니다…':`${tags.length}개 작업을 등록하는 중입니다…`;const logId=addCommandLog('수집만 실행',commandPreview);try{if(!isX)await Promise.all([saveTags(),saveLocale()]);const result=await api('/admin/api/collections',{method:'POST',body:JSON.stringify(payload())});updateCommandLog(logId,{status:'접수됨',response:`HTTP 202\n${result.message||`job_ids: ${(result.job_ids||[]).join(', ')}`}`});if(isX){$('status').className='status done';$('status').textContent=result.message;setTimeout(()=>Promise.all([loadJobs(),loadMedia()]),5000);$('run').disabled=false}else poll(result.job_ids,logId)}catch(err){$('status').className='status failed';$('status').textContent=err.message;updateCommandLog(logId,{status:'요청 실패',response:err.message,error:err.message});$('run').disabled=false}});loadTags().catch(e=>$('status').textContent=e.message);loadLocale().catch(e=>$('status').textContent=e.message);loadJobs();
+$('run-all').addEventListener('click',async()=>{const isX=currentSource()==='x';if(!isX&&!tags.length){$('status').className='status failed';$('status').textContent='검색어 태그를 하나 이상 추가하세요.';return}if(!validateCollectionRange())return;includeTodayInFilter();const button=$('run-all');button.disabled=true;$('status').className='status';$('status').textContent=isX?'Google Sheet X 포스트 수집 및 AI 초안을 요청하는 중입니다…':'n8n 전체 자동화를 요청하는 중입니다…';const logId=addCommandLog('n8n 전체 자동화',`POST /admin/api/automation\n${JSON.stringify(payload(),null,2)}`);try{if(!isX)await Promise.all([saveTags(),saveLocale()]);const result=await api('/admin/api/automation',{method:'POST',body:JSON.stringify(payload())});$('status').className='status done';$('status').innerHTML=`<strong>n8n 실행 요청 완료</strong> · ${esc(result.message)}`;updateCommandLog(logId,{status:'n8n 접수됨',response:`HTTP 202\n${result.message}`});setTimeout(()=>{loadJobs();loadMedia();loadDrafts()},6000)}catch(err){$('status').className='status failed';$('status').textContent=err.message;updateCommandLog(logId,{status:'요청 실패',response:err.message,error:err.message})}finally{button.disabled=false}});
 loadSourceCapabilities().catch(e=>$('status').textContent=e.message);loadMedia();loadDrafts();loadN8nStatus();
 </script></body></html>"""

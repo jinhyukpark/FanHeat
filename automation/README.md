@@ -74,6 +74,8 @@ Collector admin은 기본적으로 n8n과 같은 `N8N_USER`/`N8N_PASSWORD`를 �
 
 News/RSS 화면의 `수집 허용 언론사`에는 언론사명, 기사 원문 도메인, 선택 RSS HTTPS 주소를 저장할 수 있습니다. 한 곳 이상 등록하면 기사 URL의 호스트가 허용 도메인과 일치하는 결과만 수집하며, 이 목록은 관리자 전체 자동화 요청에서 n8n을 거쳐 Collector까지 전달됩니다. 기사 이미지는 갤러리로 복제하지 않습니다. 관리자가 해당 언론사의 `RSS/API·OpenGraph 썸네일 허용`을 켜면 RSS/API 이미지가 없는 경우에도 기사 원문의 `og:image` 또는 `twitter:image`를 확인해 링크 카드 미리보기 주소로 저장합니다. 기사와 썸네일은 공개 HTTPS 주소만 허용하며, 이동 후 기사 도메인도 허용 목록과 다시 대조합니다.
 
+News/RSS 수집 화면의 `뉴스 수집 시작일`과 `뉴스 수집 종료일`은 한국 시간 기준의 포함 범위입니다. 직접 수집과 관리자 전체 자동화 모두 같은 범위를 사용하며, n8n은 계산된 UTC `published_after`/`published_before` 값을 Collector에 그대로 전달합니다. Naver News Search는 기간 파라미터가 없으므로 Collector가 최신순 결과를 페이지 단위로 탐색한 뒤 선택 기간 밖의 기사를 제외합니다(검색 API가 제공하는 최대 결과 범위 내).
+
 `NAVER_CLIENT_ID`와 `NAVER_CLIENT_SECRET`이 설정된 한국 수집은 네이버 뉴스 검색 API를 우선 사용합니다. NAVER API HUB 모드는 `https://naverapihub.apigw.ntruss.com/search/v1/news`와 `X-NCP-APIGW-API-KEY-ID`/`X-NCP-APIGW-API-KEY` 헤더를 사용합니다. 네이버 응답의 `originallink`를 기사 원문으로 저장하고 그 도메인으로 언론사 허용 목록을 검사합니다. 네이버 뉴스 검색 API 응답에는 이미지 필드가 없으므로, 썸네일이 허용된 언론사는 원문 OpenGraph 정보를 보조 경로로 확인합니다.
 
 X 수집 전에는 `automation/.env`의 `X_BEARER_TOKEN` 설정이 필요합니다. 관리자 Webhook은 내부 자동화 키를 검사하므로 브라우저나 외부 클라이언트가 n8n Webhook을 직접 호출하지 않습니다.

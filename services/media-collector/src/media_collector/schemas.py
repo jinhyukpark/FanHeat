@@ -112,11 +112,22 @@ class CollectionRequest(BaseModel):
     query: str = Field(min_length=1, max_length=500)
     max_results: int = Field(default=25, ge=1, le=100)
     published_after: datetime | None = None
+    published_before: datetime | None = None
     order: CollectionOrder = CollectionOrder.DATE
     region_code: str | None = Field(default=None, pattern=r"^[A-Z]{2}$")
     language_code: str | None = Field(default=None, pattern=r"^[A-Za-z]{2,3}(-[A-Za-z]{2,8})?$")
     language_filter_mode: LanguageFilterMode | None = None
     news_sources: list[NewsSourceSetting] = Field(default_factory=list, max_length=50)
+
+    @model_validator(mode="after")
+    def validate_published_window(self) -> "CollectionRequest":
+        if (
+            self.published_after is not None
+            and self.published_before is not None
+            and self.published_after >= self.published_before
+        ):
+            raise ValueError("published_after must be earlier than published_before")
+        return self
 
 
 class CollectionResult(BaseModel):

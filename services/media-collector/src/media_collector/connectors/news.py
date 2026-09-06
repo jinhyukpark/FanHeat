@@ -85,67 +85,86 @@ class NewsConnector(Connector):
                 "X-Naver-Client-Secret": self.naver_client_secret,
             }
         )
-        params = {
-            "query": self._effective_query(request.query),
-            # Naver search is intentionally broad. Fetch extra candidates and
-            # keep only literal, K-pop-contextual matches below.
-            "display": fetch_size,
-            "start": start,
-            "sort": "date" if request.order.value == "date" else "sim",
-        }
-        if api_hub:
-            params["format"] = "json"
-        response = self.client.get(
-            self.naver_api_hub_url if api_hub else self.naver_api_url,
-            params=params,
-            headers=headers,
-        )
-        try:
-            response.raise_for_status()
-        except httpx.HTTPStatusError as exc:
-            if response.status_code == 429 or response.status_code >= 500:
-                raise ConnectorTransientError(f"Naver News API {response.status_code}: {response.text}") from exc
-            raise ConnectorError(f"Naver News API {response.status_code}: {response.text}") from exc
-        payload = response.json()
         items: list[MediaContent] = []
-        for article in payload.get("items", []):
-            title = self._plain_text(article.get("title"))
-            description = self._plain_text(article.get("description"))
-            if not self._matches_query(request.query, title, description):
-                continue
-            article_url = article.get("originallink") or article.get("link")
-            source = self._source_for_url(article_url, request.news_sources)
-            if request.news_sources and source is None:
-                continue
-            published_at = parsedate_to_datetime(article["pubDate"]).astimezone(timezone.utc)
-            if request.published_after and published_at < request.published_after:
-                continue
-            thumbnail_url = self._open_graph_thumbnail(article_url, source)
-            raw = dict(article)
-            raw["fanheat_link_policy"] = {
-                "publisher": source.name if source else (urlparse(article_url).hostname or "Naver News"),
-                "article_link_only": True,
-                "thumbnail_preview_allowed": bool(source and source.allow_thumbnail_preview),
-                "thumbnail_origin": "open_graph" if thumbnail_url else None,
-                "naver_result_url": article.get("link"),
+        total = 0
+        next_start = start
+        while next_start <= 1000 and len(items) < request.max_results:
+            params = {
+                "query": self._effective_query(request.query),
+                # A date window must be scanned newest-first. Naver does not
+                # expose server-side from/to parameters for News Search.
+                "display": fetch_size,
+                "start": next_start,
+                "sort": "date" if request.published_after or request.published_before or request.order.value == "date" else "sim",
             }
-            items.append(MediaContent(
-                source=Source.NEWS,
-                source_content_id=hashlib.sha256(article_url.encode()).hexdigest(),
-                content_type=ContentType.ARTICLE,
-                author=Author(name=source.name if source else (urlparse(article_url).hostname or "Naver News")),
-                title=title,
-                text=description,
-                url=article_url,
-                thumbnail_url=thumbnail_url,
-                published_at=published_at,
-                raw=raw,
-            ))
-            if len(items) >= request.max_results:
+            if api_hub:
+                params["format"] = "json"
+            response = self.client.get(
+                self.naver_api_hub_url if api_hub else self.naver_api_url,
+                params=params,
+                headers=headers,
+            )
+            try:
+                response.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                if response.status_code == 429 or response.status_code >= 500:
+                    raise ConnectorTransientError(f"Naver News API {response.status_code}: {response.text}") from exc
+                raise ConnectorError(f"Naver News API {response.status_code}: {response.text}") from exc
+            payload = response.json()
+            articles = payload.get("items", [])
+            total = min(int(payload.get("total", 0)), 1000)
+            oldest_published_at: datetime | None = None
+            for article in articles:
+                published_at = parsedate_to_datetime(article["pubDate"]).astimezone(timezone.utc)
+                oldest_published_at = min(oldest_published_at, published_at) if oldest_published_at else published_at
+                if not self._in_published_window(published_at, request):
+                    continue
+                title = self._plain_text(article.get("title"))
+                description = self._plain_text(article.get("description"))
+                if not self._matches_query(request.query, title, description):
+                    continue
+                article_url = article.get("originallink") or article.get("link")
+                source = self._source_for_url(article_url, request.news_sources)
+                if request.news_sources and source is None:
+                    continue
+                thumbnail_url = self._open_graph_thumbnail(article_url, source)
+                raw = dict(article)
+                raw["fanheat_link_policy"] = {
+                    "publisher": source.name if source else (urlparse(article_url).hostname or "Naver News"),
+                    "article_link_only": True,
+                    "thumbnail_preview_allowed": bool(source and source.allow_thumbnail_preview),
+                    "thumbnail_origin": "open_graph" if thumbnail_url else None,
+                    "naver_result_url": article.get("link"),
+                }
+                items.append(MediaContent(
+                    source=Source.NEWS,
+                    source_content_id=hashlib.sha256(article_url.encode()).hexdigest(),
+                    content_type=ContentType.ARTICLE,
+                    author=Author(name=source.name if source else (urlparse(article_url).hostname or "Naver News")),
+                    title=title,
+                    text=description,
+                    url=article_url,
+                    thumbnail_url=thumbnail_url,
+                    published_at=published_at,
+                    raw=raw,
+                ))
+                if len(items) >= request.max_results:
+                    break
+            next_start += fetch_size
+            if not articles or next_start > total:
                 break
-        next_start = start + fetch_size
-        next_cursor = str(next_start) if next_start <= min(int(payload.get("total", 0)), 1000) else None
+            if request.published_after and oldest_published_at and oldest_published_at < request.published_after:
+                break
+        next_cursor = str(next_start) if next_start <= total else None
         return ConnectorPage(items=items, next_cursor=next_cursor)
+
+    @staticmethod
+    def _in_published_window(published_at: datetime, request: CollectionRequest) -> bool:
+        if request.published_after and published_at < request.published_after:
+            return False
+        if request.published_before and published_at >= request.published_before:
+            return False
+        return True
 
     @staticmethod
     def _plain_text(value: str | None) -> str | None:
@@ -201,6 +220,8 @@ class NewsConnector(Connector):
         }
         if request.published_after:
             params["from"] = request.published_after.isoformat()
+        if request.published_before:
+            params["to"] = request.published_before.isoformat()
         response = self.client.get(self.news_api_url, params=params)
         try:
             response.raise_for_status()
@@ -209,11 +230,16 @@ class NewsConnector(Connector):
                 raise ConnectorTransientError(f"News API {response.status_code}: {response.text}") from exc
             raise ConnectorError(f"News API {response.status_code}: {response.text}") from exc
         payload = response.json()
-        items = [
-            self._normalize_article(article, self._source_for_url(article["url"], request.news_sources))
-            for article in payload.get("articles", [])
-            if article.get("url") and (not request.news_sources or self._source_for_url(article["url"], request.news_sources))
-        ]
+        items = []
+        for article in payload.get("articles", []):
+            if not article.get("url"):
+                continue
+            source = self._source_for_url(article["url"], request.news_sources)
+            if request.news_sources and source is None:
+                continue
+            item = self._normalize_article(article, source)
+            if self._in_published_window(item.published_at, request):
+                items.append(item)
         next_cursor = str(page + 1) if page * request.max_results < payload.get("totalResults", 0) else None
         return ConnectorPage(items=items, next_cursor=next_cursor)
 
@@ -257,7 +283,7 @@ class NewsConnector(Connector):
                 if request.news_sources and source is None:
                     continue
                 item = self._normalize_feed_entry(entry, source_name, source)
-                if not request.published_after or item.published_at >= request.published_after:
+                if self._in_published_window(item.published_at, request):
                     items.append(item)
                 if len(items) >= request.max_results:
                     return ConnectorPage(items=items)
@@ -304,7 +330,9 @@ class NewsConnector(Connector):
             if terms and not self._matches_query(request.query, title, description):
                 continue
             published_at = self._open_graph_published_at(article)
-            if request.published_after and (published_at is None or published_at < request.published_after):
+            if (request.published_after or request.published_before) and (
+                published_at is None or not self._in_published_window(published_at, request)
+            ):
                 continue
             thumbnail_url = None
             if source.allow_thumbnail_preview:

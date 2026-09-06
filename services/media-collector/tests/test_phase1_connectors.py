@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 import httpx
 
 from media_collector.connectors.news import NewsConnector
@@ -259,6 +261,64 @@ def test_naver_api_hub_uses_cloud_endpoint_and_headers():
     assert request.headers["X-NCP-APIGW-API-KEY-ID"] == "cloud-id"
     assert request.headers["X-NCP-APIGW-API-KEY"] == "cloud-secret"
     assert len(page.items) == 1
+
+
+def test_naver_news_scans_newer_pages_until_selected_date_range():
+    requested_starts = []
+
+    def article(index, published):
+        return {
+            "title": f"아이브 컴백 소식 {index}",
+            "description": "아이브 새 앨범 공개",
+            "originallink": f"https://news.example.com/article/{index}",
+            "link": f"https://n.news.naver.com/article/{index}",
+            "pubDate": published,
+        }
+
+    def transport(request):
+        start = int(request.url.params["start"])
+        requested_starts.append(start)
+        if start == 1:
+            items = [article(index, "Sun, 06 Sep 2026 11:00:00 +0900") for index in range(1, 6)]
+        else:
+            items = [article(6, "Tue, 01 Sep 2026 15:00:00 +0900")]
+        return httpx.Response(200, json={"total": 6, "items": items})
+
+    page = NewsConnector(
+        None,
+        client=httpx.Client(transport=httpx.MockTransport(transport)),
+        naver_client_id="id",
+        naver_client_secret="secret",
+    ).collect(CollectionRequest(
+        source=Source.NEWS,
+        query="아이브",
+        region_code="KR",
+        max_results=1,
+        published_after=datetime(2026, 8, 31, 15, tzinfo=timezone.utc),
+        published_before=datetime(2026, 9, 1, 15, tzinfo=timezone.utc),
+    ))
+
+    assert requested_starts == [1, 6]
+    assert [item.url for item in page.items] == ["https://news.example.com/article/6"]
+
+
+def test_news_rss_applies_both_ends_of_publication_window():
+    rss = b"""<?xml version="1.0" encoding="UTF-8"?>
+    <rss version="2.0"><channel><title>K-pop News</title>
+      <item><guid>before</guid><title>IVE comeback before</title><link>https://example.com/before</link><pubDate>Mon, 31 Aug 2026 14:59:59 GMT</pubDate></item>
+      <item><guid>inside</guid><title>IVE comeback inside</title><link>https://example.com/inside</link><pubDate>Tue, 01 Sep 2026 03:00:00 GMT</pubDate></item>
+      <item><guid>after</guid><title>IVE comeback after</title><link>https://example.com/after</link><pubDate>Tue, 01 Sep 2026 15:00:00 GMT</pubDate></item>
+    </channel></rss>"""
+    client = httpx.Client(transport=httpx.MockTransport(lambda request: httpx.Response(200, content=rss)))
+
+    page = NewsConnector(None, ["https://example.com/feed"], client=client).collect(CollectionRequest(
+        source=Source.NEWS,
+        query="IVE",
+        published_after=datetime(2026, 8, 31, 15, tzinfo=timezone.utc),
+        published_before=datetime(2026, 9, 1, 15, tzinfo=timezone.utc),
+    ))
+
+    assert [item.source_content_id for item in page.items] == ["inside"]
 
 
 def test_naver_news_rejects_semantic_results_without_literal_query_match():
