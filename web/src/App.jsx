@@ -335,8 +335,13 @@ function Hero({ user, onLogin }) {
     return () => window.removeEventListener('keydown', closeOnEscape)
   }, [photoOpen])
   useEffect(() => {
-    const openFanPhoto = () => { setPhotoStatus(''); setPhotoOpen(true) }
+    const openFanPhoto = () => {
+      window.sessionStorage.removeItem('fanheat:open-fan-photo')
+      setPhotoStatus('')
+      setPhotoOpen(true)
+    }
     window.addEventListener('fanheat:open-fan-photo', openFanPhoto)
+    if (window.sessionStorage.getItem('fanheat:open-fan-photo') === 'pending') openFanPhoto()
     return () => window.removeEventListener('fanheat:open-fan-photo', openFanPhoto)
   }, [])
   const addFanPhotos = async event => {
@@ -380,7 +385,7 @@ function Hero({ user, onLogin }) {
       <div className="hero-dots">{slides.map((_, index) => <button key={index} className={active === index ? 'active' : ''} onClick={() => setActive(index)} aria-label={`${index + 1}번째 재킷`} />)}</div>
     </div>
     <button className="ad-request-button" type="button" onClick={() => { setPhotoStatus(''); setPhotoOpen(true) }}>팬 사진 공유 <span aria-hidden="true">↗</span></button>
-    {photoOpen && <div className="ad-inquiry-overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPhotoOpen(false)}><section className="ad-inquiry-modal fan-photo-modal" role="dialog" aria-modal="true" aria-labelledby="fan-photo-title"><header><div><small>FAN PHOTO SHARE</small><h2 id="fan-photo-title">팬 사진 공유</h2><p>팬이 직접 촬영한 고화질 사진을 FANHEAT 배경 후보로 공유해 주세요.</p></div><button type="button" onClick={() => setPhotoOpen(false)} aria-label="팬 사진 공유 닫기">×</button></header><div className="fan-photo-guide"><strong>무료 사진 공유 안내</strong><p>광고 접수가 아니며 비용은 발생하지 않습니다. 운영진 심사를 거쳐 선정된 사진은 FANHEAT의 메인 배경 이미지로 무상 사용될 수 있습니다.</p><dl><div><dt>권장 크기</dt><dd>2560 × 1440px 이상</dd></div><div><dt>최소 크기</dt><dd>1920 × 1080px</dd></div><div><dt>비율</dt><dd>가로형 16:9</dd></div><div><dt>파일</dt><dd>JPG · PNG · WebP / 장당 25MB</dd></div></dl></div><form onSubmit={submitFanPhotoShare}><label><span>사진 설명 <small>선택</small></span><textarea value={photoNote} onChange={event => setPhotoNote(event.target.value)} maxLength="500" placeholder="촬영 대상, 촬영 시기와 장소 등 사진에 관한 내용을 알려주세요." /></label><div className="fan-photo-upload"><label><input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={addFanPhotos} disabled={photoFiles.length >= 5 || photoSubmitting} /><b>＋ 사진 선택</b><span>{photoFiles.length} / 5장</span></label><p className="fan-photo-upload-help">{photoFiles.length ? '선택한 사진의 해상도와 파일 크기를 확인해 주세요.' : '사진을 선택하면 미리보기와 규격 상태를 확인할 수 있습니다.'}</p><div>{photoFiles.map((item, index) => <figure key={item.preview}><img src={item.preview} alt={`${index + 1}번째 공유 사진`} /><figcaption>{item.width}×{item.height}<small>{item.width < 1920 || item.height < 1080 ? '권장 규격 미달' : `${(item.file.size / 1024 / 1024).toFixed(1)}MB`}</small></figcaption><button type="button" onClick={() => removeFanPhoto(index)} aria-label={`${index + 1}번째 사진 삭제`}>×</button></figure>)}</div></div><label className="fan-photo-consent"><input type="checkbox" checked={photoConsent} onChange={event => setPhotoConsent(event.target.checked)} required /><span>사진의 권리를 보유하고 있으며, 운영진 심사 후 FANHEAT 배경 이미지로 무상 사용하는 것에 동의합니다.</span></label>{photoStatus && <p className="fan-photo-status" role="status">{photoStatus}</p>}<button type="submit" disabled={!photoFiles.length || !photoConsent || photoSubmitting}>{!user ? '로그인하고 공유하기' : photoSubmitting ? '사진 업로드 중…' : `${photoFiles.length}장 공유하기`}</button></form><p className="ad-mail-note"><span aria-hidden="true">✓</span> 제출된 사진은 이메일이 아닌 FANHEAT 관리자 검토함에 안전하게 접수됩니다.</p></section></div>}
+    {photoOpen && createPortal(<div className="ad-inquiry-overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && setPhotoOpen(false)}><section className="ad-inquiry-modal fan-photo-modal" role="dialog" aria-modal="true" aria-labelledby="fan-photo-title"><header><div><small>FAN PHOTO SHARE</small><h2 id="fan-photo-title">팬 사진 공유</h2><p>팬이 직접 촬영한 고화질 사진을 FANHEAT 배경 후보로 공유해 주세요.</p></div><button type="button" onClick={() => setPhotoOpen(false)} aria-label="팬 사진 공유 닫기">×</button></header><div className="fan-photo-guide"><strong>무료 사진 공유 안내</strong><p>광고 접수가 아니며 비용은 발생하지 않습니다. 운영진 심사를 거쳐 선정된 사진은 FANHEAT의 메인 배경 이미지로 무상 사용될 수 있습니다.</p><dl><div><dt>권장 크기</dt><dd>2560 × 1440px 이상</dd></div><div><dt>최소 크기</dt><dd>1920 × 1080px</dd></div><div><dt>비율</dt><dd>가로형 16:9</dd></div><div><dt>파일</dt><dd>JPG · PNG · WebP / 장당 25MB</dd></div></dl></div><form onSubmit={submitFanPhotoShare}><label><span>사진 설명 <small>선택</small></span><textarea value={photoNote} onChange={event => setPhotoNote(event.target.value)} maxLength="500" placeholder="촬영 대상, 촬영 시기와 장소 등 사진에 관한 내용을 알려주세요." /></label><div className="fan-photo-upload"><label><input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={addFanPhotos} disabled={photoFiles.length >= 5 || photoSubmitting} /><b>＋ 사진 선택</b><span>{photoFiles.length} / 5장</span></label><p className="fan-photo-upload-help">{photoFiles.length ? '선택한 사진의 해상도와 파일 크기를 확인해 주세요.' : '사진을 선택하면 미리보기와 규격 상태를 확인할 수 있습니다.'}</p><div>{photoFiles.map((item, index) => <figure key={item.preview}><img src={item.preview} alt={`${index + 1}번째 공유 사진`} /><figcaption>{item.width}×{item.height}<small>{item.width < 1920 || item.height < 1080 ? '권장 규격 미달' : `${(item.file.size / 1024 / 1024).toFixed(1)}MB`}</small></figcaption><button type="button" onClick={() => removeFanPhoto(index)} aria-label={`${index + 1}번째 사진 삭제`}>×</button></figure>)}</div></div><label className="fan-photo-consent"><input type="checkbox" checked={photoConsent} onChange={event => setPhotoConsent(event.target.checked)} required /><span>사진의 권리를 보유하고 있으며, 운영진 심사 후 FANHEAT 배경 이미지로 무상 사용하는 것에 동의합니다.</span></label>{photoStatus && <p className="fan-photo-status" role="status">{photoStatus}</p>}<button type="submit" disabled={!photoFiles.length || !photoConsent || photoSubmitting}>{!user ? '로그인하고 공유하기' : photoSubmitting ? '사진 업로드 중…' : `${photoFiles.length}장 공유하기`}</button></form><p className="ad-mail-note"><span aria-hidden="true">✓</span> 제출된 사진은 이메일이 아닌 FANHEAT 관리자 검토함에 안전하게 접수됩니다.</p></section></div>, document.body)}
   </section>
 }
 
@@ -443,7 +448,12 @@ function SharedHeader({ query, setQuery, menuOpen, setMenuOpen, loggedIn, user, 
   }
   const openInfoPage = path => { setProfileOpen(false); setMenuOpen(false); window.open(`${window.location.origin}${path}?lang=${locale}`, '_blank', 'noopener,noreferrer') }
   const openMobileFeed = sort => { setSearchFilters(current => ({ ...current, sort })); setMenuOpen(false); onHome() }
-  const openFanPhotoShare = () => { setMenuOpen(false); onHome(); window.setTimeout(() => window.dispatchEvent(new CustomEvent('fanheat:open-fan-photo')), 0) }
+  const openFanPhotoShare = () => {
+    window.sessionStorage.setItem('fanheat:open-fan-photo', 'pending')
+    setMenuOpen(false)
+    onHome()
+    window.requestAnimationFrame(() => window.dispatchEvent(new CustomEvent('fanheat:open-fan-photo')))
+  }
   const unreadNoticeCount = serviceNotices.filter(notice => !readNoticeIds.includes(notice.id)).length
   const openNotices = () => { setProfileOpen(false); setMenuOpen(false); setSelectedNotice(null); setNoticeOpen(true) }
   const openNoticeDetail = notice => {
