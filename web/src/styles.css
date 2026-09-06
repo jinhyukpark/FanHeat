@@ -1330,6 +1330,14 @@
   .fan-photo-modal>.ad-mail-note{display:none}
 }
 
+/* Keep the last drawer actions clear of Android navigation and the app tab bar. */
+@media(max-width:700px){
+  .app.mobile-menu-open>.mobile-app-nav{display:none!important}
+  .app.mobile-menu-open .mobile-menu-overlay{height:100dvh;min-height:100svh}
+  .app.mobile-menu-open .mobile-menu-drawer{height:100dvh;max-height:100dvh;scroll-padding-bottom:120px}
+  .app.mobile-menu-open .mobile-menu-drawer>nav{padding-bottom:calc(112px + max(env(safe-area-inset-bottom),20px))!important}
+}
+
 /* Unified detail media carousel and image-only full-screen viewer. */
 .detail-mixed-carousel .post-x-embed,
 .detail-mixed-carousel .post-social-embed,

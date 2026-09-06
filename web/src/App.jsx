@@ -2671,7 +2671,7 @@ function FanHeatApp() {
   }
   const mobileActive = mobileVoteOpen ? 'vote' : writing ? 'write' : myPage ? 'my' : artistDirectory || selectedStar ? 'artists' : 'home'
   const openArtistDirectory = () => { setMobileVoteOpen(false); setWriting(false); setEditingPost(null); setSelectedPost(null); setSelectedStar(null); setSelectedFan(null); setMyPage(false); setQuery(''); setArtistDirectory(true) }
-  return <div className={`app ${USER_MUSIC_PLAYBACK_ENABLED ? '' : 'music-playback-disabled'} ${mobileVoteOpen ? 'mobile-vote-page-open' : ''} ${myPage ? `my-page-view my-page-mobile-${myPageMobileSection} ${myPageMobileSection === 'profile' ? 'my-page-mobile-profile' : 'my-page-mobile-content'}` : ''}`} id="top" onScrollCapture={revealTransientScrollbar}>
+  return <div className={`app ${USER_MUSIC_PLAYBACK_ENABLED ? '' : 'music-playback-disabled'} ${menuOpen ? 'mobile-menu-open' : ''} ${mobileVoteOpen ? 'mobile-vote-page-open' : ''} ${myPage ? `my-page-view my-page-mobile-${myPageMobileSection} ${myPageMobileSection === 'profile' ? 'my-page-mobile-profile' : 'my-page-mobile-content'}` : ''}`} id="top" onScrollCapture={revealTransientScrollbar}>
     {writing
       ? <div className="detail-shell compose-shell"><ComposerPreview draft={draft} images={draftImages} /></div>
       : selectedPost
