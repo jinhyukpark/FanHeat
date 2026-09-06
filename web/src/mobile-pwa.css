@@ -132,21 +132,22 @@
 
   /* Mobile voting is a real app page, not a bottom sheet over the feed. */
   .mobile-vote-page-open>.left-shell,.mobile-vote-page-open>.content,.mobile-vote-page-open>.player,.mobile-vote-page-open>.mobile-my-page-tabs{display:none!important}
-  .mobile-vote-page.mobile-vote-sheet{width:100%;height:auto;min-height:calc(100dvh - 62px - env(safe-area-inset-bottom));padding:0;display:flex;flex-direction:column;overflow:hidden;border-radius:0;background:#f7f5fa;box-shadow:none;animation:none}
+  .mobile-vote-page.mobile-vote-sheet{width:100%;height:calc(100dvh - 62px - env(safe-area-inset-bottom));min-height:0;max-height:calc(100dvh - 62px - env(safe-area-inset-bottom));padding:0;display:flex;flex-direction:column;overflow:hidden;border-radius:0;background:#f7f5fa;box-shadow:none;animation:none}
   .mobile-vote-page.mobile-vote-sheet>header{height:calc(72px + env(safe-area-inset-top));min-height:calc(72px + env(safe-area-inset-top));padding:env(safe-area-inset-top) 16px 0;display:grid;grid-template-columns:44px minmax(0,1fr) 44px;align-items:center;justify-content:initial;border-bottom:1px solid #e7e1eb;background:#fff}
   .mobile-vote-page.mobile-vote-sheet>header::after{content:"";width:44px;height:44px}
   .mobile-vote-page.mobile-vote-sheet>header>div{min-width:0;text-align:center}.mobile-vote-page.mobile-vote-sheet>header h2{font-size:20px;line-height:1.25}.mobile-vote-page.mobile-vote-sheet>header small{font-size:12px}
   .mobile-vote-page.mobile-vote-sheet>header>.mobile-vote-page-back{width:40px;height:40px;display:grid;place-items:center;border:1px solid #ded8e4;border-radius:50%;background:#fff;color:#514a56;font:400 30px/1 Arial;box-shadow:0 3px 12px #25183010}
-  .mobile-vote-page.mobile-vote-sheet .chart-panel{height:auto;min-height:0;flex:1;display:flex!important;background:#fff}
+  .mobile-vote-page.mobile-vote-sheet .chart-panel{height:auto;min-height:0;flex:1;display:flex!important;overflow:hidden;background:#fff}
   .mobile-vote-page.mobile-vote-sheet .brand-tile{height:218px;min-height:218px;flex-basis:218px;padding:15px 20px 17px;gap:6px}
   .mobile-vote-page.mobile-vote-sheet .voting-mode .brand-tile{height:154px;min-height:154px;flex-basis:154px;padding:12px 18px}
   .mobile-vote-page.mobile-vote-sheet .brand-tile>img{width:72px;max-width:72px;height:52px}
   .mobile-vote-page .daily-vote-state{min-height:24px;margin:0;padding:4px 12px;position:relative;z-index:1;border:1px solid #ffffff2c;border-radius:13px;background:#ffffff10;color:#eee8f7;font-size:12px;font-weight:600;line-height:1.25}.mobile-vote-page .daily-vote-state.complete{border-color:#bba6ff66;background:#9c7cff20;color:#d8ccff}
-  .mobile-vote-page.mobile-vote-sheet .chart-list{padding:0 0 16px;scroll-padding-top:0;background:transparent}
+  .mobile-vote-page.mobile-vote-sheet .chart-list{height:0;min-height:0;flex:1 1 0;padding:0 0 calc(16px + env(safe-area-inset-bottom));overflow-x:hidden;overflow-y:auto;overscroll-behavior-y:contain;scroll-padding:0 0 calc(16px + env(safe-area-inset-bottom));touch-action:pan-y;background:transparent;-webkit-overflow-scrolling:touch}
   .mobile-vote-page.mobile-vote-sheet .chart-list li,.mobile-vote-page.mobile-vote-sheet .chart-list.voting li{height:72px;min-height:72px;margin:0;border:0;border-radius:0;box-shadow:none}
   .mobile-vote-page.mobile-vote-sheet .chart-list.voting li:nth-child(n),.mobile-vote-page.mobile-vote-sheet .chart-list.voting li:nth-child(n):hover{background-color:transparent;background-size:240% 240%;animation:vote-card-aurora 8.5s ease-in-out infinite alternate}
   .mobile-vote-page.mobile-vote-sheet .chart-list.voting li::before{display:block}
   .mobile-vote-page.mobile-vote-sheet .chart-list button,.mobile-vote-page.mobile-vote-sheet .chart-list.voting button{padding:8px 4px;grid-template-columns:62px 50px minmax(0,1fr) 64px 26px;gap:8px;border-radius:0}
+  .mobile-vote-page.mobile-vote-sheet .chart-list button{touch-action:pan-y}
   .mobile-vote-page.mobile-vote-sheet .chart-list.voting li.vote-selected{box-shadow:inset 3px 0 #795ce4}
   .mobile-vote-page.mobile-vote-sheet .chart-list.voting li.vote-selected button{background:transparent}
   .mobile-vote-page .rank{width:28px;height:28px;display:flex;align-items:center;justify-content:center;justify-self:start;gap:2px;border-radius:50%;background:#f0edf3;color:#746d78;font-size:12px;font-weight:800}.mobile-vote-page .rank-crowns{display:flex;align-items:center;gap:0;white-space:nowrap;font-size:12px;line-height:1}.mobile-vote-page .rank-crowns span{width:12px;display:block}.mobile-vote-page .vote-rank-1,.mobile-vote-page .vote-rank-2,.mobile-vote-page .vote-rank-3{width:auto;min-width:48px;padding:0 5px;border-radius:14px}.mobile-vote-page .vote-rank-1{background:linear-gradient(135deg,#fff2bd,#ffd267);color:#6c4200}.mobile-vote-page .vote-rank-2{background:linear-gradient(135deg,#f4f6f8,#dce2ea);color:#4e5968}.mobile-vote-page .vote-rank-3{background:linear-gradient(135deg,#f8dfcb,#e7a879);color:#693717}
@@ -165,7 +166,7 @@
     font-size:14px;
     line-height:1;
   }
-  .mobile-vote-page.mobile-vote-sheet .chart-list.voting{padding:0 0 16px;background:transparent}
+  .mobile-vote-page.mobile-vote-sheet .chart-list.voting{padding:0 0 calc(16px + env(safe-area-inset-bottom));background:transparent}
   .mobile-vote-page.mobile-vote-sheet .chart-list.voting li,
   .mobile-vote-page.mobile-vote-sheet .chart-list.voting li.vote-selected{
     margin:0;
