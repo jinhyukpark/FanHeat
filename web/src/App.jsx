@@ -404,8 +404,23 @@ function ChartPanel({ onPlay, activeSong, songPlaying = false, items = charts, a
   const ownVoteArtist = ownVote ? artists.find(artist => artist.id === ownVote.artist_id) : null
   const ownVoteLabel = ownVoteArtist?.name_ko || ownVoteArtist?.name || ownVoteItem?.[1] || ownVoteItem?.[0] || '선택한 아티스트'
   const filteredVoteItems = voteQuery.trim() ? artists.filter(artist => `${artist.name} ${artist.name_ko || ''}`.toLowerCase().includes(voteQuery.trim().toLowerCase())).map(artist => [artist.name_ko || artist.name, artist.name, artist.image_url, { artist_id: artist.id }]) : items
-  const selectedVoteIndex = voteMode && ownVote ? filteredVoteItems.findIndex(([, , , data = {}]) => data.artist_id === ownVote.artist_id) : -1
-  const voteItems = selectedVoteIndex > 0 ? [filteredVoteItems[selectedVoteIndex], ...filteredVoteItems.slice(0, selectedVoteIndex), ...filteredVoteItems.slice(selectedVoteIndex + 1)] : filteredVoteItems
+  const voteScore = ([, , , data = {}]) => Number(dailyCounts[data.artist_id] ?? data.vote_count ?? 0)
+  const voteEntries = filteredVoteItems
+    .map((item, registrationIndex) => {
+      const displayOrder = Number(item[3]?.display_order)
+      return { item, registrationIndex, registrationOrder: Number.isFinite(displayOrder) ? displayOrder : registrationIndex, score: voteScore(item) }
+    })
+    .sort((a, b) => showVoteRanking
+      ? b.score - a.score || a.registrationOrder - b.registrationOrder || a.registrationIndex - b.registrationIndex
+      : a.registrationOrder - b.registrationOrder || a.registrationIndex - b.registrationIndex)
+    .map((entry, position, orderedEntries) => ({
+      ...entry,
+      rankNumber: showVoteRanking
+        ? entry.score > 0
+          ? 1 + orderedEntries.filter(candidate => candidate.score > entry.score).length
+          : position + 1
+        : Number(entry.item[3]?.display_order) || position + 1,
+    }))
   const voteUnchanged = Boolean(selectedVote && ownVote?.artist_id === selectedVote.data.artist_id)
   const submitVote = async () => {
     if (!selectedVote || !user || voteUnchanged) return
@@ -425,23 +440,22 @@ function ChartPanel({ onPlay, activeSong, songPlaying = false, items = charts, a
       {!voteMode && <button className={`vote-button ${ownVote ? 'complete' : ''}`} onClick={openVoting}>{ownVote ? '1Day 투표 완료' : t('voteDay')}</button>}
     </div>
     <ol className={`chart-list ${showVoteRanking ? 'voting vote-ranking' : ''} ${dedicatedVotePage && !voteMode ? 'vote-readonly' : ''}`}>
-      {voteItems.map(([title, artist, image, data = {}], index) => {
-        const rankNumber = Number(data.display_order || index + 1)
-        const crownCount = dedicatedVotePage && rankNumber <= 3 ? 4 - rankNumber : 0
+      {voteEntries.map(({ item: [title, artist, image, data = {}], score, rankNumber }, index) => {
+        const crownCount = dedicatedVotePage && rankNumber && rankNumber <= 3 ? 4 - rankNumber : 0
         const selected = voteMode ? (selectedVote?.data.artist_id || ownVote?.artist_id) === data.artist_id : false
         return <li key={`${data.artist_id || title}-${index}`} className={`${USER_MUSIC_PLAYBACK_ENABLED && activeSong === index && !showVoteRanking ? 'playing' : ''} ${selected ? 'vote-selected' : ''}`.trim()}>
-        <button type="button" onClick={() => voteMode ? setSelectedVote({ title, artist, image, data }) : dedicatedVotePage || !USER_MUSIC_PLAYBACK_ENABLED ? undefined : onPlay(index)} aria-label={voteMode ? ownVote?.artist_id === data.artist_id ? `${title}, 현재 투표한 아티스트` : `${title}로 투표 변경` : dedicatedVotePage ? `${rankNumber}위 ${title}, 현재 ${Number(dailyCounts[data.artist_id] ?? data.vote_count ?? 0).toLocaleString()}표` : `${rankNumber}위 ${title}, ${artist}`}>
-          <span className={`rank vote-rank-${rankNumber}`}>
+        <button type="button" onClick={() => voteMode ? setSelectedVote({ title, artist, image, data }) : dedicatedVotePage || !USER_MUSIC_PLAYBACK_ENABLED ? undefined : onPlay(index)} aria-label={voteMode ? ownVote?.artist_id === data.artist_id ? `${title}, 현재 투표한 아티스트` : `${title}로 투표 변경` : dedicatedVotePage ? `${rankNumber ? `${rankNumber}위` : '순위 미정'} ${title}, 현재 ${score.toLocaleString()}표` : `${rankNumber}위 ${title}, ${artist}`}>
+          <span className={`rank ${rankNumber ? `vote-rank-${rankNumber}` : 'vote-unranked'}`}>
             {crownCount > 0 && <span className="rank-crowns" aria-hidden="true">{Array.from({ length: crownCount }, (_, crownIndex) => <span key={crownIndex}>👑</span>)}</span>}
-            <span>{String(rankNumber).padStart(2, '0')}</span>
+            <span>{rankNumber ? String(rankNumber).padStart(2, '0') : '—'}</span>
           </span>
           <span className="cover"><img src={assetSrc(image)} alt={`${title} 커버`} /><b className={`compact-rank rank-${index + 1}`}>{index + 1}위</b>{USER_MUSIC_PLAYBACK_ENABLED && <i>{activeSong === index && songPlaying ? 'Ⅱ' : '▶'}</i>}</span>
           <span className="song"><strong>{localizeTitle(title)}</strong><small>{artist}</small></span>
-          {showVoteRanking && <span className="vote-score"><small>SCORE</small><strong>{Number(dailyCounts[data.artist_id] ?? data.vote_count ?? 0).toLocaleString()}</strong></span>}
+          {showVoteRanking && <span className="vote-score"><small>SCORE</small><strong>{score.toLocaleString()}</strong></span>}
           {voteMode && <span className={`vote-check ${selected ? 'selected' : ''}`}>✓</span>}
         </button>
       </li>})}
-      {voteMode && selectedVote && <div className="vote-confirm" role="dialog" aria-modal="true" aria-label="가수 투표 확인"><img src={assetSrc(selectedVote.image)} alt="" /><h3>{selectedVote.title}</h3><p>{selectedVote.artist}</p><span>Today</span><strong>{(dailyCounts[selectedVote.data.artist_id] || 0).toLocaleString()}<small>표</small></strong>{voteMessage && <em>{voteMessage}</em>}<div><button onClick={submitVote} disabled={votePending || voteUnchanged}>{voteUnchanged ? '현재 선택' : votePending ? '처리 중' : ownVote ? '투표 변경' : '투표'}</button><button onClick={() => setSelectedVote(null)}>취소</button></div></div>}
+      {voteMode && selectedVote && <div className="vote-confirm" role="dialog" aria-modal="true" aria-label="가수 투표 확인"><img src={assetSrc(selectedVote.image)} alt="" /><h3>{selectedVote.title}</h3><p>{selectedVote.artist}</p><span>Today</span><strong>{(dailyCounts[selectedVote.data.artist_id] || 0).toLocaleString()}<small>표</small></strong>{voteMessage && <em>{voteMessage}</em>}<div><button onClick={submitVote} disabled={votePending || voteUnchanged}>{voteUnchanged ? '현재 선택' : votePending ? '처리 중' : ownVote ? '변경' : '투표'}</button><button onClick={() => setSelectedVote(null)}>취소</button></div></div>}
     </ol>
     {voteMode && <div className="vote-cancel-bar"><button type="button" onClick={openVoting}>투표 취소</button></div>}
   </aside>

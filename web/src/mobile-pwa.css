@@ -114,6 +114,11 @@
   .mobile-vote-sheet .chart-list{height:auto;min-height:0;flex:1;padding:8px 10px 12px;overscroll-behavior:contain;background:#f7f5fa;scrollbar-width:none}.mobile-vote-sheet .chart-list::-webkit-scrollbar{display:none}
   .mobile-vote-sheet .chart-list li,.mobile-vote-sheet .chart-list.voting li{height:68px;min-height:68px;margin:0 0 7px;border:1px solid #e7e1eb;border-radius:15px;background:#fff;box-shadow:0 4px 14px #2a17370a}
   .mobile-vote-sheet .chart-list li:nth-child(even),.mobile-vote-sheet .chart-list.voting li:nth-child(even){background:#fff}
+  .mobile-vote-sheet .chart-list.voting li{background-image:linear-gradient(118deg,#e9f4ff 0%,#f5e7ff 26%,#dcedff 50%,#f7ddfa 73%,#e4f4ff 100%);background-size:240% 240%;background-position:0% 50%}
+  .mobile-vote-sheet .chart-list.voting li:nth-child(3n+2){background-image:linear-gradient(118deg,#e2f1ff 0%,#fadcf7 27%,#eee5ff 52%,#d9ecff 76%,#f8e4fa 100%)}
+  .mobile-vote-sheet .chart-list.voting li:nth-child(3n){background-image:linear-gradient(118deg,#deedff 0%,#eadcff 25%,#f8e6f6 49%,#d9efff 74%,#eee1ff 100%)}
+  .mobile-vote-sheet .chart-list.voting li:nth-child(4n){background-image:linear-gradient(118deg,#eee6ff 0%,#d8caff 26%,#d5eeff 50%,#f5def7 76%,#e0eaff 100%)}
+  .mobile-vote-sheet .chart-list.voting li.vote-selected{background-image:linear-gradient(118deg,#ded1ff 0%,#eccfff 25%,#bee3ff 50%,#f2ccf8 76%,#cee8ff 100%)}
   .mobile-vote-sheet .chart-list button,.mobile-vote-sheet .chart-list.voting button{padding:8px 12px;grid-template-columns:28px 48px minmax(0,1fr) 62px 25px;gap:8px;border-radius:15px}
   .mobile-vote-sheet .chart-list:not(.voting) button{grid-template-columns:28px 48px minmax(0,1fr)}
   .mobile-vote-sheet .chart-list.vote-readonly button{grid-template-columns:28px 48px minmax(0,1fr) 62px}
@@ -121,7 +126,9 @@
   .mobile-vote-sheet .song strong{color:#332e36;font-size:14px;font-weight:700}.mobile-vote-sheet .song small{color:#8d8591;font-size:12px}.mobile-vote-sheet .vote-score{min-width:58px}.mobile-vote-sheet .vote-score small{color:#958c99;font-size:12px}.mobile-vote-sheet .vote-score strong{color:#5d5262;font-size:12px}.mobile-vote-sheet .vote-check{width:25px;height:25px;border-color:#d7d0dc}.mobile-vote-sheet .vote-check.selected{border-color:#795ce4;background:linear-gradient(135deg,#7758e5,#a16fe9);box-shadow:0 4px 10px #7355db4a}
   .mobile-vote-sheet .chart-list.voting li::before{border-radius:15px}.mobile-vote-sheet .chart-list.voting li.vote-selected{border-color:#9a82eb;box-shadow:0 6px 20px #7255d62b}.mobile-vote-sheet .chart-list.voting li.vote-selected button{background:linear-gradient(90deg,#f4f0ff,#fbfaff)}
   .mobile-vote-sheet .vote-mode-close{display:none}.mobile-vote-sheet .vote-cancel-bar{display:flex;flex:0 0 auto;padding:8px 10px calc(8px + env(safe-area-inset-bottom));border-top:1px solid #e3dde8;background:#fffffff2}.mobile-vote-sheet .vote-cancel-bar button{height:44px;border:0;border-radius:13px;background:#2d2831;font-size:13px}
-  .mobile-vote-sheet .vote-confirm{padding-top:38px;border-radius:15px;background:linear-gradient(145deg,#19131fef,#332348f2)}.mobile-vote-sheet .vote-confirm h3{font-size:18px}.mobile-vote-sheet .vote-confirm p,.mobile-vote-sheet .vote-confirm>span,.mobile-vote-sheet .vote-confirm>strong small,.mobile-vote-sheet .vote-confirm>em{font-size:12px}
+  .mobile-vote-sheet .vote-confirm{inset:0;min-height:100%;padding:38px 24px 28px;overflow-y:auto;border:0;border-radius:0;background:linear-gradient(145deg,#19131ff5,#332348f7);box-shadow:none}.mobile-vote-sheet .vote-confirm h3{font-size:18px}.mobile-vote-sheet .vote-confirm p,.mobile-vote-sheet .vote-confirm>span,.mobile-vote-sheet .vote-confirm>strong small,.mobile-vote-sheet .vote-confirm>em{font-size:12px}
+  .mobile-vote-sheet .chart-list .vote-confirm>div{width:auto;display:flex;gap:12px}
+  .mobile-vote-sheet .chart-list .vote-confirm>div button{width:80px;min-width:80px;height:80px;padding:0 8px;display:grid;place-items:center;border-radius:50%;font-size:12px;line-height:1;white-space:nowrap}
 
   /* Mobile voting is a real app page, not a bottom sheet over the feed. */
   .mobile-vote-page-open>.left-shell,.mobile-vote-page-open>.content,.mobile-vote-page-open>.player,.mobile-vote-page-open>.mobile-my-page-tabs{display:none!important}
@@ -130,18 +137,48 @@
   .mobile-vote-page.mobile-vote-sheet>header::after{content:"";width:44px;height:44px}
   .mobile-vote-page.mobile-vote-sheet>header>div{min-width:0;text-align:center}.mobile-vote-page.mobile-vote-sheet>header h2{font-size:20px;line-height:1.25}.mobile-vote-page.mobile-vote-sheet>header small{font-size:12px}
   .mobile-vote-page.mobile-vote-sheet>header>.mobile-vote-page-back{width:40px;height:40px;display:grid;place-items:center;border:1px solid #ded8e4;border-radius:50%;background:#fff;color:#514a56;font:400 30px/1 Arial;box-shadow:0 3px 12px #25183010}
-  .mobile-vote-page.mobile-vote-sheet .chart-panel{height:auto;min-height:0;flex:1;display:flex!important;background:#f7f5fa}
+  .mobile-vote-page.mobile-vote-sheet .chart-panel{height:auto;min-height:0;flex:1;display:flex!important;background:#fff}
   .mobile-vote-page.mobile-vote-sheet .brand-tile{height:218px;min-height:218px;flex-basis:218px;padding:15px 20px 17px;gap:6px}
   .mobile-vote-page.mobile-vote-sheet .voting-mode .brand-tile{height:154px;min-height:154px;flex-basis:154px;padding:12px 18px}
   .mobile-vote-page.mobile-vote-sheet .brand-tile>img{width:72px;max-width:72px;height:52px}
   .mobile-vote-page .daily-vote-state{min-height:24px;margin:0;padding:4px 12px;position:relative;z-index:1;border:1px solid #ffffff2c;border-radius:13px;background:#ffffff10;color:#eee8f7;font-size:12px;font-weight:600;line-height:1.25}.mobile-vote-page .daily-vote-state.complete{border-color:#bba6ff66;background:#9c7cff20;color:#d8ccff}
-  .mobile-vote-page.mobile-vote-sheet .chart-list{padding:10px 12px 16px;scroll-padding-top:10px}
-  .mobile-vote-page.mobile-vote-sheet .chart-list li,.mobile-vote-page.mobile-vote-sheet .chart-list.voting li{height:72px;min-height:72px;margin-bottom:8px;border-radius:17px;box-shadow:0 5px 18px #2a17370d}
-  .mobile-vote-page.mobile-vote-sheet .chart-list button,.mobile-vote-page.mobile-vote-sheet .chart-list.voting button{padding:8px 12px;grid-template-columns:62px 50px minmax(0,1fr) 64px 26px;gap:8px;border-radius:17px}
+  .mobile-vote-page.mobile-vote-sheet .chart-list{padding:0 0 16px;scroll-padding-top:0;background:transparent}
+  .mobile-vote-page.mobile-vote-sheet .chart-list li,.mobile-vote-page.mobile-vote-sheet .chart-list.voting li{height:72px;min-height:72px;margin:0;border:0;border-radius:0;box-shadow:none}
+  .mobile-vote-page.mobile-vote-sheet .chart-list.voting li:nth-child(n),.mobile-vote-page.mobile-vote-sheet .chart-list.voting li:nth-child(n):hover{background-color:transparent;background-size:240% 240%;animation:vote-card-aurora 8.5s ease-in-out infinite alternate}
+  .mobile-vote-page.mobile-vote-sheet .chart-list.voting li::before{display:block}
+  .mobile-vote-page.mobile-vote-sheet .chart-list button,.mobile-vote-page.mobile-vote-sheet .chart-list.voting button{padding:8px 4px;grid-template-columns:62px 50px minmax(0,1fr) 64px 26px;gap:8px;border-radius:0}
+  .mobile-vote-page.mobile-vote-sheet .chart-list.voting li.vote-selected{box-shadow:inset 3px 0 #795ce4}
+  .mobile-vote-page.mobile-vote-sheet .chart-list.voting li.vote-selected button{background:transparent}
   .mobile-vote-page .rank{width:28px;height:28px;display:flex;align-items:center;justify-content:center;justify-self:start;gap:2px;border-radius:50%;background:#f0edf3;color:#746d78;font-size:12px;font-weight:800}.mobile-vote-page .rank-crowns{display:flex;align-items:center;gap:0;white-space:nowrap;font-size:12px;line-height:1}.mobile-vote-page .rank-crowns span{width:12px;display:block}.mobile-vote-page .vote-rank-1,.mobile-vote-page .vote-rank-2,.mobile-vote-page .vote-rank-3{width:auto;min-width:48px;padding:0 5px;border-radius:14px}.mobile-vote-page .vote-rank-1{background:linear-gradient(135deg,#fff2bd,#ffd267);color:#6c4200}.mobile-vote-page .vote-rank-2{background:linear-gradient(135deg,#f4f6f8,#dce2ea);color:#4e5968}.mobile-vote-page .vote-rank-3{background:linear-gradient(135deg,#f8dfcb,#e7a879);color:#693717}
   .mobile-vote-page .song strong{font-size:14px}.mobile-vote-page .song small{font-size:12px}.mobile-vote-page .vote-score small{color:#8f8694;font-size:12px;letter-spacing:.4px}.mobile-vote-page .vote-score strong{color:#443b49;font-size:13px}
   .mobile-vote-page .chart-list.vote-readonly button{grid-template-columns:62px 50px minmax(0,1fr) 64px;cursor:default}.mobile-vote-page .chart-list.vote-readonly li::before{opacity:.35;animation:none}
   .mobile-vote-page .vote-cancel-bar{padding-bottom:9px}.mobile-vote-page .vote-cancel-bar button{height:44px;font-size:13px}
+  .mobile-vote-page.mobile-vote-sheet .chart-list .vote-confirm>div button{
+    width:80px;
+    min-width:80px;
+    height:80px;
+    padding:0;
+    display:grid;
+    grid-template-columns:1fr;
+    place-items:center;
+    border-radius:50%;
+    font-size:14px;
+    line-height:1;
+  }
+  .mobile-vote-page.mobile-vote-sheet .chart-list.voting{padding:0 0 16px;background:transparent}
+  .mobile-vote-page.mobile-vote-sheet .chart-list.voting li,
+  .mobile-vote-page.mobile-vote-sheet .chart-list.voting li.vote-selected{
+    margin:0;
+    border:0;
+    border-radius:0;
+    box-shadow:none;
+  }
+  .mobile-vote-page.mobile-vote-sheet .chart-list.voting li::before{
+    height:1px;
+    inset:auto 16px 0;
+    padding:0;
+    border-radius:999px;
+  }
   @media(max-width:390px){.mobile-vote-page.mobile-vote-sheet .chart-list button,.mobile-vote-page.mobile-vote-sheet .chart-list.voting button{grid-template-columns:58px 44px minmax(0,1fr) 52px 24px;gap:5px;padding-inline:8px}.mobile-vote-page.mobile-vote-sheet .chart-list.vote-readonly button{grid-template-columns:58px 44px minmax(0,1fr) 52px}.mobile-vote-page.mobile-vote-sheet .cover{width:44px;height:44px;min-width:44px;min-height:44px}.mobile-vote-page .vote-score{min-width:50px}.mobile-vote-page .rank-crowns{letter-spacing:-2px}.mobile-vote-page .vote-rank-1,.mobile-vote-page .vote-rank-2,.mobile-vote-page .vote-rank-3{padding-inline:3px}}
 
   .player{right:10px;bottom:calc(70px + env(safe-area-inset-bottom));left:10px;grid-template-columns:40px minmax(0,1fr) 34px 28px;border-radius:14px;box-shadow:0 12px 36px #160c2655}
