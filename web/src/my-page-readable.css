@@ -336,12 +336,17 @@
 @media(max-width:700px){
   .app:has(.my-page-profile){padding-bottom:calc(112px + env(safe-area-inset-bottom))}
   .app:has(.mobile-my-page-tabs){padding-bottom:calc(112px + env(safe-area-inset-bottom))}
+  /* When music playback is disabled, do not keep the old player space twice.
+     The profile itself reserves only enough room for the fixed mobile nav. */
+  .app.music-playback-disabled:has(.my-page-profile),
+  .app.music-playback-disabled:has(.mobile-my-page-tabs){padding-bottom:0}
   .app:has(.my-page-profile) .mobile-app-nav{
     z-index:200;
     display:grid!important;
   }
   .my-page-profile{padding-bottom:calc(132px + env(safe-area-inset-bottom))}
   .app:has(.mobile-my-page-tabs) .my-page-profile{padding-bottom:calc(132px + env(safe-area-inset-bottom))}
+  .app.music-playback-disabled .my-page-profile{padding-bottom:calc(76px + env(safe-area-inset-bottom))}
   .my-page-unified-audio{
     z-index:190;
     bottom:calc(62px + env(safe-area-inset-bottom));
@@ -585,17 +590,26 @@
     width:100%;
     margin-top:18px;
     display:grid;
-    grid-template-columns:repeat(4,minmax(0,1fr));
-    gap:8px;
+    grid-template-columns:repeat(2,minmax(0,1fr));
+    gap:12px 14px;
   }
-  .my-resources dl>div{min-width:0;gap:6px}
+  .my-resources dl>div{min-width:0;align-items:flex-start;gap:8px}
   .my-resources dl>div:nth-child(1){grid-column:1}
   .my-resources dl>div:nth-child(2){grid-column:2}
-  .my-resources dl>.fan-cred-summary{grid-column:3 / 5;margin-left:0}
-  .my-resources dl dt{width:34px;height:34px;flex:0 0 34px}
-  .my-resources dl dd{min-width:0}
+  .my-resources dl>.fan-cred-summary{grid-column:1 / -1;margin-left:0;align-items:center}
+  .my-resources dl dt{
+    width:auto;
+    min-width:42px;
+    height:28px;
+    padding:0 8px;
+    flex:0 0 auto;
+    border-radius:7px;
+  }
+  .my-resources dl dd{min-width:0;display:flex;flex-direction:column}
   .my-resources dl dd b,.fan-cred-summary dd b{font-size:var(--fh-type-meta);white-space:nowrap}
   .my-resources dl dd small{margin-top:2px;font-size:var(--fh-type-caption);white-space:nowrap}
+  .my-resources dl>.fan-cred-summary dd{flex-direction:row;align-items:center;gap:10px}
+  .my-resources dl>.fan-cred-summary dd small{margin-top:0}
 }
 
 @media(max-width:380px){
@@ -606,9 +620,9 @@
     align-items:flex-start;
     justify-content:flex-start;
   }
-  .my-resources dl{gap:6px}
-  .my-resources dl>div{gap:4px}
-  .my-resources dl dt{width:30px;height:30px;flex-basis:30px}
+  .my-resources dl{gap:10px 8px}
+  .my-resources dl>div{gap:6px}
+  .my-resources dl dt{min-width:38px;height:26px;padding:0 6px}
 }
 /* Notice center opened from the profile guidance menu. */
 .profile-account-menu .notice-menu-badge{width:auto;min-width:48px;padding:3px 7px;border-radius:999px;background:#ef476f;color:#fff;font-size:12px;font-weight:700;line-height:1.2;text-align:center}

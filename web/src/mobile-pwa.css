@@ -141,8 +141,10 @@
   .detail-shell:not(.compose-shell) .post-detail{
     height:100%;
     min-height:0;
+    padding-top:calc(68px + env(safe-area-inset-top));
     overflow-x:hidden;
     overflow-y:auto;
+    overflow-anchor:none;
     overscroll-behavior-y:contain;
     -webkit-overflow-scrolling:touch;
     scroll-padding-bottom:calc(86px + env(safe-area-inset-bottom));
@@ -155,12 +157,10 @@
     padding-bottom:12px;
   }
   .detail-shell:not(.compose-shell) .comment-form>div{
-    min-height:52px;
+    min-height:44px;
     padding:6px 0;
-    position:sticky;
-    z-index:42;
-    bottom:calc(44px + env(safe-area-inset-bottom));
-    background:linear-gradient(180deg,rgba(248,248,248,.9),#f8f8f8 30%);
+    position:static;
+    background:transparent;
   }
   .detail-shell:not(.compose-shell) .comment-form button[type="submit"]{
     min-width:88px;
@@ -229,8 +229,8 @@
   }
 }
 
-/* Mobile detail: reserve a readable title area before featured media starts. */
-@media (max-width:700px){
+/* Standalone tablet/mobile detail always keeps its back navigation visible. */
+@media (max-width:1024px){
   .detail-shell .detail-mobile-header{
     box-sizing:border-box;
     min-height:calc(58px + env(safe-area-inset-top));
@@ -293,13 +293,71 @@
     white-space:nowrap;
   }
   .detail-mobile-header-spacer{width:86px;height:1px}
+}
+
+/* Desktop detail: place the diagonal near the vertical center of the active media. */
+@media (min-width:701px){
+  .detail-shell:not(.compose-shell) .detail-hero{
+    --detail-hero-gradient:linear-gradient(90deg,#6c269a 0%,#0e92dc 100%);
+    background:var(--detail-hero-gradient);
+  }
+  .detail-shell:not(.compose-shell) .detail-hero>p{
+    font-size:15px;
+    line-height:1.6;
+  }
+  .detail-shell:not(.compose-shell) .detail-hero::after{
+    height:60px;
+    bottom:-1px;
+    background:#f8f8f8;
+    clip-path:polygon(0 100%,100% 0,100% 100%);
+    pointer-events:none;
+  }
+  .detail-shell:not(.compose-shell) .post-detail:has(.detail-mixed-carousel.active-x) .detail-hero{
+    --detail-desktop-diagonal-depth:310px;
+  }
+  .detail-shell:not(.compose-shell) .post-detail:has(.detail-mixed-carousel.active-instagram,.detail-mixed-carousel.active-facebook) .detail-hero{
+    --detail-desktop-diagonal-depth:350px;
+  }
+  .detail-shell:not(.compose-shell) .post-detail:has(.detail-mixed-carousel.active-tiktok) .detail-hero{
+    --detail-desktop-diagonal-depth:410px;
+  }
+  .detail-shell:not(.compose-shell) .post-detail:has(.detail-youtube-carousel.youtube-portrait) .detail-hero{
+    --detail-desktop-diagonal-depth:304px;
+  }
+  .detail-shell:not(.compose-shell) .post-detail:has(.detail-mixed-carousel.active-x,.detail-mixed-carousel.active-instagram,.detail-mixed-carousel.active-facebook,.detail-mixed-carousel.active-tiktok,.detail-youtube-carousel.youtube-portrait) .detail-hero::after{
+    height:var(--detail-desktop-diagonal-depth);
+    bottom:calc(-1 * var(--detail-desktop-diagonal-depth) + 1px);
+    background:var(--detail-hero-gradient);
+    clip-path:polygon(0 0,100% 0,100% 0,0 100%);
+  }
+}
+
+/* Mobile detail: reserve a readable title area before featured media starts. */
+@media (max-width:700px){
+  .detail-shell .detail-mobile-header{position:fixed;right:0;left:0}
   .detail-shell .detail-hero{
-    min-height:300px;
-    padding:18px 22px 76px;
+    --detail-diagonal-depth:clamp(150px,32vw,300px);
+    --detail-hero-gradient:linear-gradient(90deg,#6c269a 0%,#0e92dc 100%);
+    min-height:0;
+    padding:22px 22px 70px;
+    background:var(--detail-hero-gradient);
+  }
+  .detail-shell .post-detail:has(.detail-youtube-carousel.youtube-portrait) .detail-hero{
+    --detail-diagonal-depth:clamp(340px,74vw,680px);
+  }
+  .detail-shell .post-detail:has(.detail-mixed-carousel.active-x,.detail-mixed-carousel.active-instagram,.detail-mixed-carousel.active-facebook,.detail-mixed-carousel.active-tiktok) .detail-hero{
+    --detail-diagonal-depth:clamp(260px,56vw,520px);
+  }
+  .detail-shell .detail-hero::after{
+    height:var(--detail-diagonal-depth);
+    bottom:calc(-1 * var(--detail-diagonal-depth) + 1px);
+    background:var(--detail-hero-gradient);
+    clip-path:polygon(0 0,100% 0,100% 0,0 100%);
+    pointer-events:none;
   }
   .detail-shell .detail-hero h1{
     max-width:100%;
-    margin:18px 0 7px;
+    margin:16px 0 7px;
     display:-webkit-box;
     overflow:hidden;
     font-size:19px;
@@ -323,7 +381,7 @@
   }
   .detail-shell .detail-body{
     width:calc(100% - 44px);
-    margin:-73px auto 40px;
+    margin:-46px auto 40px;
   }
 }
 
