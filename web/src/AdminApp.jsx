@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from './lib/supabase'
 import {
   isAdminUser,
+  deleteAdminMembers,
   loadAdminAlbumDetail,
   loadAdminArtistDetail,
   loadAdminArtists,
@@ -68,8 +69,32 @@ function Dashboard({ data }) {
 
 function Members({ rows, onReload }) {
   const [editing, setEditing] = useState(null)
-  const save = async event => { event.preventDefault(); await updateAdminMember(editing.id, editing); setEditing(null); onReload('회원 프로필을 저장했습니다.') }
-  return <><section className="admin-card-grid member-grid">{rows.map(member => <button type="button" key={member.id} onClick={() => setEditing({ ...member, avatar_url: member.avatar_url || '', bio: member.bio || '' })}><img src={member.avatar_url || '/images/icon_member.png'} alt="" /><span><strong>{member.display_name}{member.is_ai && <i className="admin-ai-badge">AI FAN</i>}</strong><small>{member.id}</small><em>{formatDate(member.created_at)} 가입</em></span><b>관리</b></button>)}</section>{editing && <div className="admin-modal-backdrop" onMouseDown={event => event.target === event.currentTarget && setEditing(null)}><form className="admin-modal" onSubmit={save}><header><div><small>MEMBER PROFILE</small><h2>{editing.display_name}</h2></div><button type="button" onClick={() => setEditing(null)}>×</button></header><label>표시 이름<input value={editing.display_name} onChange={event => setEditing({ ...editing, display_name: event.target.value })} required /></label><label>프로필 이미지 URL<input value={editing.avatar_url} onChange={event => setEditing({ ...editing, avatar_url: event.target.value })} /></label><label>소개<textarea value={editing.bio} onChange={event => setEditing({ ...editing, bio: event.target.value })} /></label><label className="admin-check"><input type="checkbox" checked={Boolean(editing.is_ai)} onChange={event => setEditing({ ...editing, is_ai: event.target.checked })} /> AI가 운영하는 팬 계정</label><button className="admin-primary">변경사항 저장</button></form></div>}</>
+  const [tab, setTab] = useState('human')
+  const [selectedIds, setSelectedIds] = useState(() => new Set())
+  const [deleting, setDeleting] = useState(false)
+  const humanCount = rows.filter(member => !member.is_ai).length
+  const aiCount = rows.filter(member => member.is_ai).length
+  const visibleRows = rows.filter(member => tab === 'ai' ? member.is_ai : !member.is_ai)
+  const selectedCount = visibleRows.filter(member => selectedIds.has(member.id)).length
+  const allSelected = visibleRows.length > 0 && selectedCount === visibleRows.length
+  const save = async event => { event.preventDefault(); await updateAdminMember(editing.id, editing); setEditing(null); setSelectedIds(new Set()); onReload('회원 프로필을 저장했습니다.') }
+  const changeTab = nextTab => { setTab(nextTab); setSelectedIds(new Set()) }
+  const toggleSelected = id => setSelectedIds(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })
+  const toggleAll = () => setSelectedIds(allSelected ? new Set() : new Set(visibleRows.map(member => member.id)))
+  const removeSelected = async () => {
+    const ids = visibleRows.filter(member => selectedIds.has(member.id)).map(member => member.id)
+    if (!ids.length || !window.confirm(`선택한 ${tab === 'ai' ? 'AI 회원' : '사람 회원'} ${ids.length}명을 삭제할까요? 회원 계정과 연결된 데이터가 함께 삭제되며 복구할 수 없습니다.`)) return
+    setDeleting(true)
+    try {
+      const result = await deleteAdminMembers(ids)
+      setSelectedIds(new Set())
+      const failedCount = result?.failed?.length || 0
+      await onReload(failedCount ? `${result.deleted.length}명을 삭제했고 ${failedCount}명은 보호 계정이거나 삭제에 실패했습니다.` : `선택한 회원 ${result.deleted.length}명을 삭제했습니다.`)
+    } finally {
+      setDeleting(false)
+    }
+  }
+  return <><nav className="admin-member-tabs" aria-label="회원 유형"><button type="button" className={tab === 'human' ? 'active' : ''} onClick={() => changeTab('human')}>사람 회원 <span>{humanCount}</span></button><button type="button" className={tab === 'ai' ? 'active' : ''} onClick={() => changeTab('ai')}>AI 회원 <span>{aiCount}</span></button></nav><div className="admin-member-selection"><label><input type="checkbox" checked={allSelected} disabled={!visibleRows.length} onChange={toggleAll} /> 전체 선택</label><span>{selectedCount}명 선택</span><button type="button" disabled={!selectedCount || deleting} onClick={removeSelected}>{deleting ? '삭제 중…' : '선택 삭제'}</button></div><section className="admin-card-grid member-grid">{visibleRows.map(member => <article className={selectedIds.has(member.id) ? 'selected' : ''} key={member.id}><label className="admin-member-checkbox"><input type="checkbox" checked={selectedIds.has(member.id)} onChange={() => toggleSelected(member.id)} aria-label={`${member.display_name} 선택`} /></label><img src={member.avatar_url || '/images/icon_member.png'} alt="" /><span><strong>{member.display_name}{member.is_ai && <i className="admin-ai-badge">AI FAN</i>}</strong><small>{member.id}</small><em>{formatDate(member.created_at)} 가입</em></span><button type="button" onClick={() => setEditing({ ...member, avatar_url: member.avatar_url || '', bio: member.bio || '' })}>관리</button></article>)}{!visibleRows.length && <p className="admin-empty">검색 조건에 맞는 {tab === 'ai' ? 'AI 회원' : '사람 회원'}이 없습니다.</p>}</section>{editing && <div className="admin-modal-backdrop" onMouseDown={event => event.target === event.currentTarget && setEditing(null)}><form className="admin-modal" onSubmit={save}><header><div><small>MEMBER PROFILE</small><h2>{editing.display_name}</h2></div><button type="button" onClick={() => setEditing(null)}>×</button></header><label>표시 이름<input value={editing.display_name} onChange={event => setEditing({ ...editing, display_name: event.target.value })} required /></label><label>프로필 이미지 URL<input value={editing.avatar_url} onChange={event => setEditing({ ...editing, avatar_url: event.target.value })} /></label><label>소개<textarea value={editing.bio} onChange={event => setEditing({ ...editing, bio: event.target.value })} /></label><label className="admin-check"><input type="checkbox" checked={Boolean(editing.is_ai)} onChange={event => setEditing({ ...editing, is_ai: event.target.checked })} /> AI가 운영하는 팬 계정</label><button className="admin-primary">변경사항 저장</button></form></div>}</>
 }
 
 function FanPhotos({ rows, onReload }) {

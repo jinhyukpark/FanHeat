@@ -22,7 +22,12 @@ class ConnectorRegistry:
             Source.YOUTUBE: YouTubeConnector(settings.youtube_api_key, settings.request_timeout_seconds),
             Source.X: XConnector(settings.x_bearer_token, settings.request_timeout_seconds),
             Source.NEWS: NewsConnector(
-                settings.news_api_key, settings.rss_feeds, settings.request_timeout_seconds
+                settings.news_api_key,
+                settings.rss_feeds,
+                settings.request_timeout_seconds,
+                naver_client_id=settings.naver_client_id,
+                naver_client_secret=settings.naver_client_secret,
+                naver_api_provider=settings.naver_api_provider,
             ),
         }
 

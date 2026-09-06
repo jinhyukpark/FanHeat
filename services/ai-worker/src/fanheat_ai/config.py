@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./fanheat_ai.db"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "qwen3:8b"
+    ollama_vision_model: str = "qwen3-vl:8b"
     llm_timeout_seconds: float = Field(default=120, gt=0)
     pipeline_batch_size: int = Field(default=5, ge=1, le=50)
     prompt_version: str = "fanheat-v1"

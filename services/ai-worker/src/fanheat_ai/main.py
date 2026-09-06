@@ -19,6 +19,8 @@ from .schemas import (
 )
 from .service import PipelineService
 from .workload import LLMWorkCoordinator
+from .artist_writing import ArtistWritingRequest, write_artist
+from .vision import GalleryImageRequest, classify_image
 
 
 settings = get_settings()
@@ -43,11 +45,35 @@ def require_internal_api_key(x_fanheat_api_key: str | None = Header(default=None
         raise HTTPException(status_code=401, detail="invalid internal API key")
 
 
+@app.post('/v1/artists/write', dependencies=[Depends(require_internal_api_key)])
+def artist_writing(request: ArtistWritingRequest):
+    from .llm import LLMError
+    if not settings.internal_api_key:
+        raise HTTPException(status_code=503, detail='internal authentication not configured')
+    try:
+        with workload.manual():
+            return write_artist(request, llm) | {'model': settings.ollama_model}
+    except LLMError:
+        raise HTTPException(status_code=502, detail='Artist writing failed; existing content was not changed')
+
+
 @app.get("/health")
 def health() -> dict:
     with engine.connect() as connection:
         connection.execute(text("select 1"))
     return {"status": "ok", "version": __version__, "llm_reachable": llm.health(), "model": settings.ollama_model}
+
+
+@app.post('/v1/artists/classify-image', dependencies=[Depends(require_internal_api_key)])
+def gallery_classification(request: GalleryImageRequest):
+    import httpx
+    if not settings.internal_api_key:
+        raise HTTPException(status_code=503, detail='internal authentication not configured')
+    try:
+        with workload.manual():
+            return classify_image(request, settings)
+    except (httpx.HTTPError, ValueError, KeyError):
+        raise HTTPException(status_code=502, detail='Image classification unavailable; keep image pending review')
 
 
 @app.post("/v1/pipeline/run", response_model=PipelineResult, dependencies=[Depends(require_internal_api_key)])

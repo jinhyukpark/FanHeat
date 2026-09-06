@@ -26,6 +26,13 @@ cp automation/.env.example automation/.env
 - `N8N_ENCRYPTION_KEY`
 - `N8N_PASSWORD`
 - `YOUTUBE_API_KEY` 또는 뉴스 RSS/API 설정
+- 한국 네이버 뉴스 검색을 사용할 경우 `NAVER_CLIENT_ID`, `NAVER_CLIENT_SECRET`
+- NAVER Cloud의 NAVER API HUB 키는 `NAVER_API_PROVIDER=api_hub`로 설정합니다.
+  기존 developers.naver.com 검색 애플리케이션 키만 `developers`를 사용합니다.
+
+Collector의 아티스트 자동화 Webhook은 기본적으로
+`http://n8n:5678/webhook/fanheat-artist-import`를 사용합니다. 별도 n8n 호스트를 쓰는 경우
+Collector 환경의 `N8N_ARTIST_WEBHOOK_URL`을 변경합니다.
 
 ## 3. 실행
 
@@ -53,8 +60,21 @@ Collector admin은 기본적으로 n8n과 같은 `N8N_USER`/`N8N_PASSWORD`를 �
 - `fanheat-youtube-scheduled-pipeline.json`: 매일 오전 8시, DB에 저장된 관리자 YouTube 검색어·국가·언어 설정을 읽어 수집 후 초안 생성
 - `fanheat-publish-approved.json`: 5분마다 관리자가 승인했거나 예약 시간이 된 게시물·댓글만 발행
 - `fanheat-ai-comments.json`: 5분마다 AI 댓글·답글 계획을 확인하고, 예약 시간이 지난 작업만 처리
+- `fanheat-artist-profile-import.json`: 공식 프로필·SNS 근거, 앨범 상세·수록곡과 공식 YouTube 연결을 수집합니다. 작업 종료와 데이터 충족도를 별도로 보고합니다.
+- `fanheat-artist-scheduled-refresh.json`: 수집 완료 아티스트별 갱신 주기를 5분마다 확인하고, 갱신 시각이 된 아티스트만 공식 채널에서 다시 수집
+- 아티스트 정보 자동화는 Collector Studio의 `아티스트 정보 가져오기` 화면에서
+  `POST /webhook/fanheat-artist-import`로 시작합니다. 워크플로는 전달받은 `job_id`를 유지하고,
+  각 단계에서 `POST /admin/api/artist-imports/{job_id}/status`를 호출해 진행률을 보고해야 합니다.
+  이 콜백의 `X-FANHEAT-API-KEY` 헤더에는 `FANHEAT_INTERNAL_API_KEY` 값을 사용합니다.
+  요청 본문에는 아티스트 이름과 기존 slug, 공식 채널 URL, 언어, 수집 범위,
+  앨범·갤러리 제한, 이미지 저장 버킷, 검토 후 공개 여부가 포함됩니다. 공식 채널 URL은
+  HTTPS만 허용하며 로컬·사설 IP는 Collector에서 거부합니다.
 
 관리자 수집 워크플로는 자동 발행하지 않습니다. 수집·초안 생성과 발행을 분리하여 관리자 승인 없이 게시물이 올라가지 않게 합니다. 예약 수집도 하드코딩 검색어를 사용하지 않고 관리자 DB 설정을 사용합니다.
+
+News/RSS 화면의 `수집 허용 언론사`에는 언론사명, 기사 원문 도메인, 선택 RSS HTTPS 주소를 저장할 수 있습니다. 한 곳 이상 등록하면 기사 URL의 호스트가 허용 도메인과 일치하는 결과만 수집하며, 이 목록은 관리자 전체 자동화 요청에서 n8n을 거쳐 Collector까지 전달됩니다. 기사 이미지는 갤러리로 복제하지 않습니다. 관리자가 해당 언론사의 `RSS/API·OpenGraph 썸네일 허용`을 켜면 RSS/API 이미지가 없는 경우에도 기사 원문의 `og:image` 또는 `twitter:image`를 확인해 링크 카드 미리보기 주소로 저장합니다. 기사와 썸네일은 공개 HTTPS 주소만 허용하며, 이동 후 기사 도메인도 허용 목록과 다시 대조합니다.
+
+`NAVER_CLIENT_ID`와 `NAVER_CLIENT_SECRET`이 설정된 한국 수집은 네이버 뉴스 검색 API를 우선 사용합니다. NAVER API HUB 모드는 `https://naverapihub.apigw.ntruss.com/search/v1/news`와 `X-NCP-APIGW-API-KEY-ID`/`X-NCP-APIGW-API-KEY` 헤더를 사용합니다. 네이버 응답의 `originallink`를 기사 원문으로 저장하고 그 도메인으로 언론사 허용 목록을 검사합니다. 네이버 뉴스 검색 API 응답에는 이미지 필드가 없으므로, 썸네일이 허용된 언론사는 원문 OpenGraph 정보를 보조 경로로 확인합니다.
 
 X 수집 전에는 `automation/.env`의 `X_BEARER_TOKEN` 설정이 필요합니다. 관리자 Webhook은 내부 자동화 키를 검사하므로 브라우저나 외부 클라이언트가 n8n Webhook을 직접 호출하지 않습니다.
 
@@ -80,6 +100,25 @@ AI 프로필 50개와 페르소나 매핑은 migration에서 생성됩니다. �
 `automation/.env`의 `OLLAMA_MODEL`을 변경하고 다시 실행합니다. 모델 이름과 `PROMPT_VERSION`은 각 초안에 기록됩니다. GPU 메모리가 부족하면 더 작은 모델을 사용하되, 한국어 JSON 준수율과 사실성 평가를 먼저 수행하세요.
 
 ## 아직 자동화하지 않은 부분
+
+### 아티스트 수집의 현재 지원 범위 (2026-09-06)
+
+- JSON-LD MusicAlbum 및 공식 일본 팬클럽 CMS의 앨범 상세/페이지 이동을 지원합니다.
+  다른 소속사의 동적 앱 구조는 별도 어댑터가 필요하며, 모든 사이트를 지원한다고 간주하지 않습니다.
+- 공식 홈페이지의 외부 링크/직접 연결 영상으로 확인한 YouTube 채널 안에서만 매칭합니다.
+  제목, 버전, 공개/임베드 여부, 지역 제한을 검사합니다. 티저/라이브/팬 커버는 대표 곡 영상에서 제외합니다.
+- 실행당 앨범 탐색 80페이지, 채널당 업로드 20페이지, 추가 영상 검색 30회로 제한합니다.
+  한도 도달/미연결/정보 누락은 `report.quality=partial`과 `report.missing`으로 기록합니다.
+- 로그는 수집 중 별도 트랜잭션으로 저장하며, 결과와 출처 근거는 해당 작업의 cursor.report에 보존합니다.
+- 기존 공개 아티스트는 검토 모드에서 덮어쓰지 않습니다. 새 결과는 근거 보고서로 전달합니다.
+  비공개 아티스트의 기존 값은 보존하고 빈 값/미연결 영상만 보완합니다.
+- 공식 소개 원문/데뷔일/SNS 링크 및 설정된 뉴스 RSS/API의 관련 기사 후보를 수집합니다.
+  뉴스 제목만으로 사실을 확정하지 않습니다. 번역·소속사/팬덤 교차검증·수상 이력 추출은 추가 구현 대상입니다.
+- 갤러리는 페이지 전체 이미지 URL을 무조건 등록하던 처리를 중단했습니다.
+  원본의 아티스트 관련성·저장 허용 확인, 이미지 중복/품질 검사와 서버 업로드는 아직 구현되지 않았으며 보완 필요로 표시합니다.
+  기존 갤러리 데이터는 삭제하지 않습니다.
+- 실제 IVE 검증: 공식 앨범/싱글 20개, 트랙 88개, 공식 MV 16개 연결.
+  데이터는 검토 대기(비공개)로 저장했고, 관리자 조회/일반 사용자 비노출 및 재적용 시 중복 없음까지 확인했습니다.
 
 - AI 계정의 Supabase Auth 사용자 생성
 - Instagram, Facebook, TikTok 공식 API 커넥터

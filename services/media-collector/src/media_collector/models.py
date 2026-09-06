@@ -61,6 +61,7 @@ class CollectorSettings(Base):
     hashtag_count: Mapped[int] = mapped_column(Integer, default=5)
     ai_comment_min_count: Mapped[int] = mapped_column(Integer, default=5)
     ai_comment_max_count: Mapped[int] = mapped_column(Integer, default=30)
+    news_sources: Mapped[list] = mapped_column(JSON, default=list)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
 

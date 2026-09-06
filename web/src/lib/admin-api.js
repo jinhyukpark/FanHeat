@@ -52,15 +52,38 @@ export async function updateAdminMember(id, values) {
   }).eq('id', id).select().single())
 }
 
+export async function deleteAdminMembers(ids) {
+  if (!Array.isArray(ids) || !ids.length) return { deleted: [], failed: [] }
+  const { data, error } = await requireSupabase().functions.invoke('admin-delete-members', {
+    body: { ids },
+  })
+  if (error) throw error
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
 const albumTrackSelect = 'artist_album_tracks(id,album_id,track_number,title,duration_text,lyrics_excerpt,youtube_url,active,display_order,created_at,updated_at)'
-const artistDetailSelect = `id,slug,name,name_ko,image_url,description,active,created_at,updated_at,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,tracks(count),award_entries(count),posts(count),artist_albums(id,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,active,display_order,created_at,updated_at,${albumTrackSelect}),artist_gallery_items(id,title,image_url,captured_on,active,display_order,created_at,updated_at),artist_fans(id,profile_id,display_name,handle,avatar_url,heat_percent,featured_rank,active,display_order,created_at,updated_at)`
+const artistDetailSelect = `id,slug,name,name_ko,image_url,description,active,review_pending,created_at,updated_at,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,tracks(count),award_entries(count),posts(count),artist_correction_requests(id,status),artist_albums(id,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,active,display_order,created_at,updated_at,${albumTrackSelect}),artist_gallery_items(id,title,image_url,source_page_url,original_image_url,source_collected_at,source_provider,creator_name,license_name,license_url,attribution_text,rights_verified_at,captured_on,active,display_order,created_at,updated_at),artist_fans(id,profile_id,display_name,handle,avatar_url,heat_percent,featured_rank,active,display_order,created_at,updated_at)`
 
 export async function loadAdminArtists() {
-  return throwIfError(await requireSupabase().from('artists').select(artistDetailSelect).order('active', { ascending: false }).order('name_ko'))
+  return throwIfError(await requireSupabase().from('artists').select(artistDetailSelect).order('created_at', { ascending: false }).order('id', { ascending: false }))
 }
 
 export async function loadAdminArtistDetail(id) {
   return throwIfError(await requireSupabase().from('artists').select(artistDetailSelect).eq('id', id).single())
+}
+
+export async function setAdminArtistVisibility(id, active, reviewPending = false) {
+  return throwIfError(await requireSupabase().from('artists')
+    .update({ active, review_pending: reviewPending }).eq('id', id).select('id, active, review_pending').single())
+}
+
+export async function deleteAdminArtist(id) {
+  if (!Number.isSafeInteger(Number(id)) || Number(id) <= 0) throw new Error('삭제할 아티스트를 확인할 수 없습니다.')
+  // One database DELETE: related rows cascade atomically under existing admin RLS.
+  const removed = throwIfError(await requireSupabase().from('artists').delete().eq('id', id).select('id'))
+  if (!removed?.length) throw new Error('이미 삭제되었거나 삭제 권한이 없습니다. 목록을 새로고침해 주세요.')
+  return removed[0]
 }
 
 export async function updateAdminArtist(id, values) {
@@ -90,9 +113,16 @@ export async function updateAdminArtist(id, values) {
   }).eq('id', id).select().single())
 }
 
+function gallerySourceUrl(value) {
+  if (!value?.trim()) return null
+  const url = new URL(value.trim())
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) throw new Error('출처는 HTTP 또는 HTTPS 주소로 입력하세요.')
+  return url.href
+}
+
 const relationPayloads = {
   artist_albums: values => ({ title: values.title?.trim(), lead_track: values.lead_track?.trim() || '', release_date: values.release_date || null, album_type: values.album_type?.trim() || '앨범', track_count: Math.max(0, Number(values.track_count || 0)), cover_url: values.cover_url?.trim() || null, youtube_url: values.youtube_url?.trim() || null, description: values.description?.trim() || null, label: values.label?.trim() || null, genre: values.genre?.trim() || null, external_url: values.external_url?.trim() || null, active: Boolean(values.active), display_order: Number(values.display_order || 0) }),
-  artist_gallery_items: values => ({ title: values.title?.trim(), image_url: values.image_url?.trim(), captured_on: values.captured_on || null, active: Boolean(values.active), display_order: Number(values.display_order || 0) }),
+  artist_gallery_items: values => ({ source_page_url: gallerySourceUrl(values.source_page_url), original_image_url: gallerySourceUrl(values.original_image_url), source_provider: values.source_provider?.trim() || null, creator_name: values.creator_name?.trim() || null, license_name: values.license_name?.trim() || null, license_url: gallerySourceUrl(values.license_url), attribution_text: values.attribution_text?.trim() || null, title: values.title?.trim(), image_url: values.image_url?.trim(), captured_on: values.captured_on || null, active: Boolean(values.active), display_order: Number(values.display_order || 0) }),
   artist_fans: values => ({ profile_id: values.profile_id || null, display_name: values.display_name?.trim(), handle: values.handle?.trim(), avatar_url: values.avatar_url?.trim() || null, heat_percent: Math.max(0, Math.min(100, Number(values.heat_percent || 0))), featured_rank: values.featured_rank ? Number(values.featured_rank) : null, active: Boolean(values.active), display_order: Number(values.display_order || 0) }),
 }
 
@@ -108,6 +138,18 @@ export async function saveAdminArtistRelation(table, artistId, values) {
 export async function deleteAdminArtistRelation(table, id) {
   if (!relationPayloads[table]) throw new Error('지원하지 않는 아티스트 상세 유형입니다.')
   return throwIfError(await requireSupabase().from(table).delete().eq('id', id).select().single())
+}
+
+export async function setAdminAlbumVisibility(artistId, ids, active, includeTracks) {
+  return throwIfError(await requireSupabase().rpc('set_artist_album_visibility', {
+    target_artist_id: artistId, album_ids: ids, make_public: active, include_tracks: includeTracks,
+  }))
+}
+
+export async function deleteAdminArtistRelations(table, ids) {
+  if (!relationPayloads[table]) throw new Error('지원하지 않는 아티스트 상세 유형입니다.')
+  if (!Array.isArray(ids) || !ids.length) return []
+  return throwIfError(await requireSupabase().from(table).delete().in('id', ids).select())
 }
 
 export async function loadAdminAlbumDetail(id) {

@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -14,6 +15,9 @@ class Settings(BaseSettings):
     x_bearer_token: str | None = None
     news_api_key: str | None = None
     news_rss_feeds: str = ""
+    naver_client_id: str | None = None
+    naver_client_secret: str | None = None
+    naver_api_provider: Literal["developers", "api_hub"] = "api_hub"
     request_timeout_seconds: float = Field(default=20, gt=0)
     max_results_per_request: int = Field(default=25, ge=1, le=100)
     internal_api_key: str | None = None
@@ -22,6 +26,7 @@ class Settings(BaseSettings):
     ai_worker_url: str = "http://localhost:8090"
     n8n_webhook_url: str = "http://localhost:5678/webhook/fanheat-full-pipeline"
     n8n_x_webhook_url: str = "http://localhost:5678/webhook/fanheat-x-pipeline"
+    n8n_artist_webhook_url: str = "http://localhost:5678/webhook/fanheat-artist-import"
     n8n_health_url: str = "http://localhost:5678/healthz"
     n8n_api_key: str | None = None
 

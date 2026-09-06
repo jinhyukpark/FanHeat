@@ -138,6 +138,39 @@
   .player{right:10px;bottom:calc(70px + env(safe-area-inset-bottom));left:10px;grid-template-columns:40px minmax(0,1fr) 34px 28px;border-radius:14px;box-shadow:0 12px 36px #160c2655}
   .detail-shell{inset:0!important;width:100%!important;height:100dvh!important;max-height:none;z-index:45;box-shadow:none}
   .compose-shell{position:relative!important;height:auto!important;min-height:100dvh}
+  .detail-shell:not(.compose-shell) .post-detail{
+    height:100%;
+    min-height:0;
+    overflow-x:hidden;
+    overflow-y:auto;
+    overscroll-behavior-y:contain;
+    -webkit-overflow-scrolling:touch;
+    scroll-padding-bottom:calc(86px + env(safe-area-inset-bottom));
+  }
+  .detail-shell:not(.compose-shell) .comments{
+    padding-bottom:calc(100px + env(safe-area-inset-bottom));
+  }
+  .detail-shell:not(.compose-shell) .comment-form{
+    position:relative;
+    padding-bottom:12px;
+  }
+  .detail-shell:not(.compose-shell) .comment-form>div{
+    min-height:52px;
+    padding:6px 0;
+    position:sticky;
+    z-index:42;
+    bottom:calc(44px + env(safe-area-inset-bottom));
+    background:linear-gradient(180deg,rgba(248,248,248,.9),#f8f8f8 30%);
+  }
+  .detail-shell:not(.compose-shell) .comment-form button[type="submit"]{
+    min-width:88px;
+    height:40px;
+    padding:0 18px;
+    border-radius:20px;
+    font-size:14px;
+    font-weight:700;
+    box-shadow:0 5px 16px rgba(90,62,193,.2);
+  }
   .detail-shell .detail-audio{width:100vw;bottom:0}
   .writing-content,.star-content,.my-content,.artist-directory-content{padding-bottom:calc(18px + env(safe-area-inset-bottom))}
 }

@@ -24,12 +24,16 @@ services:
       X_BEARER_TOKEN: ${X_BEARER_TOKEN:-}
       NEWS_API_KEY: ${NEWS_API_KEY:-}
       NEWS_RSS_FEEDS: ${NEWS_RSS_FEEDS:-}
+      NAVER_CLIENT_ID: ${NAVER_CLIENT_ID:-}
+      NAVER_CLIENT_SECRET: ${NAVER_CLIENT_SECRET:-}
+      NAVER_API_PROVIDER: ${NAVER_API_PROVIDER:-api_hub}
       INTERNAL_API_KEY: ${FANHEAT_INTERNAL_API_KEY:?FANHEAT_INTERNAL_API_KEY is required}
       COLLECTOR_ADMIN_USER: ${COLLECTOR_ADMIN_USER:-${N8N_USER:-fanheat}}
       COLLECTOR_ADMIN_PASSWORD: ${COLLECTOR_ADMIN_PASSWORD:-${N8N_PASSWORD:?N8N_PASSWORD is required}}
       AI_WORKER_URL: http://ai-worker:8090
       N8N_WEBHOOK_URL: http://n8n:5678/webhook/fanheat-full-pipeline
       N8N_X_WEBHOOK_URL: http://n8n:5678/webhook/fanheat-x-pipeline
+      N8N_ARTIST_WEBHOOK_URL: http://n8n:5678/webhook/fanheat-artist-import
       N8N_HEALTH_URL: http://n8n:5678/healthz
       N8N_API_KEY: ${N8N_API_KEY:-}
     ports:
@@ -85,6 +89,7 @@ services:
       DATABASE_URL: ${DATABASE_URL:?DATABASE_URL is required}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3:8b}
+      OLLAMA_VISION_MODEL: ${OLLAMA_VISION_MODEL:-qwen3-vl:8b}
       INTERNAL_API_KEY: ${FANHEAT_INTERNAL_API_KEY:?FANHEAT_INTERNAL_API_KEY is required}
       PIPELINE_BATCH_SIZE: 5
       PROMPT_VERSION: fanheat-v1

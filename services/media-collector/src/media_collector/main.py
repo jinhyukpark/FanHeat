@@ -1,11 +1,13 @@
 from contextlib import asynccontextmanager
 
+import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException, status
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from . import __version__
 from .admin import router as admin_router
+from .artist_import import discover_artist_sources, import_artist
 from .config import get_settings
 from .db import get_db
 from .models import CollectionJob, CollectionRule, CollectorSettings
@@ -84,7 +86,11 @@ def get_automation_config(source: Source, db: Session = Depends(get_db)) -> dict
     configured = {
         Source.YOUTUBE: bool(settings.youtube_api_key),
         Source.X: bool(settings.x_bearer_token),
-        Source.NEWS: bool(settings.news_api_key or settings.rss_feeds),
+        Source.NEWS: bool(
+            (settings.naver_client_id and settings.naver_client_secret)
+            or settings.news_api_key
+            or settings.rss_feeds
+        ),
     }[source]
     return {
         "source": source.value,
@@ -128,6 +134,54 @@ def import_x_google_drive(request: XDriveImportRequest, db: Session = Depends(ge
         )
     except Exception as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/artists/import/sync", dependencies=[Depends(require_internal_api_key)])
+def run_artist_import(request: dict, db: Session = Depends(get_db)) -> dict:
+    """Fetch official artist pages and stage verified metadata for administrator review."""
+    try:
+        return import_artist(db, request)
+    except RuntimeError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except (httpx.HTTPError, OSError, ValueError) as exc:
+        db.rollback()
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@app.post("/v1/artists/discover/sync", dependencies=[Depends(require_internal_api_key)])
+def discover_artist_channels(request: dict) -> dict:
+    """Find official artist channels when an administrator supplied only a name."""
+    artist_name = str(request.get("artist_name") or "").strip()
+    if not artist_name:
+        raise HTTPException(status_code=422, detail="artist_name is required")
+    supplied_urls = list(dict.fromkeys(str(url) for url in request.get("official_source_urls", []) if url))
+    if supplied_urls:
+        return request | {
+            "official_source_urls": supplied_urls,
+            "can_collect": True,
+            "ambiguous": False,
+            "confidence": 1.0,
+            "logs": ["관리자가 입력한 공식 채널 URL을 우선 사용합니다.", *[f"입력 출처 확인: {url}" for url in supplied_urls]],
+        }
+    settings = get_settings()
+    try:
+        discovery = discover_artist_sources(
+            artist_name,
+            language_code=str(request.get("language_code") or "ko"),
+            country_code=str(request.get("country_code") or "KR"),
+            youtube_api_key=settings.youtube_api_key,
+            timeout=settings.request_timeout_seconds,
+        )
+        return request | discovery
+    except (httpx.HTTPError, OSError, ValueError) as exc:
+        return request | {
+            "official_source_urls": [],
+            "can_collect": False,
+            "ambiguous": True,
+            "confidence": 0,
+            "logs": [f"공식 채널 자동 탐색 실패: {str(exc)[:500]}", "수집을 일시 정지하고 관리자 확인을 요청합니다."],
+        }
 
 
 @app.get("/v1/collections/{job_id}", dependencies=[Depends(require_internal_api_key)])

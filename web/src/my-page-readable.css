@@ -263,9 +263,12 @@
 .message-folders .message-new-button:hover,.message-folders .message-new-button:focus-visible{background:#6649d5;outline:2px solid #d9d0ff;outline-offset:2px}
 .message-notice{margin:0;padding:10px 4%;border-bottom:1px solid #e9e3f3;background:#f3efff;color:#654bd0;font-size:var(--fh-type-meta);line-height:1.45}
 .message-list-shell{min-height:510px;padding:0 4% 50px;background:#fff}
-.message-search{height:64px;display:flex;align-items:center;gap:9px;border-bottom:1px solid #e9e5ec;color:#968e9a}
-.message-search span{font-size:20px}
-.message-search input{width:min(480px,100%);border:0;outline:0;color:#3f3943;font-size:var(--fh-type-body)}
+.message-search{width:min(500px,100%);height:46px;margin:20px 0 24px;padding:0 16px;display:flex;align-items:center;gap:10px;border:1px solid #ddd7e5;border-radius:24px;background:#fff;color:#918997;transition:border-color .16s,box-shadow .16s}
+.message-search:focus-within{border-color:#8a71e5;box-shadow:0 0 0 3px #8066df14}
+.message-search svg{width:18px;height:18px;flex:0 0 18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round}
+.message-search input{min-width:0;flex:1;border:0;outline:0;background:transparent;color:#3f3943;font-size:var(--fh-type-body)}
+.message-search input::placeholder{color:#aaa3ad}
+.message-search button{width:24px;height:24px;padding:0;border:0;border-radius:50%;background:#f2eef6;color:#77707d;font-size:16px;line-height:1;cursor:pointer}
 .message-board-head{height:38px;padding:0 14px;display:grid;grid-template-columns:38px 44px minmax(120px,.42fr) minmax(180px,1fr) 145px 72px 24px;align-items:center;gap:12px;border:1px solid #e6e1e9;border-bottom:0;border-radius:14px 14px 0 0;background:#faf9fb;color:#928a96;font-size:var(--fh-type-caption)}
 .message-list{overflow:hidden;border:1px solid #ebe7ed;border-radius:0 0 14px 14px;background:#fff}
 .message-row{border-bottom:1px solid #eeeaf0;background:#fff}
@@ -458,7 +461,7 @@
   .message-folders button{height:50px;white-space:nowrap}
   .message-folders em{display:none}
   .message-list-shell{padding:0 12px 34px}
-  .message-search{height:56px}
+  .message-search{width:100%;height:44px;margin:16px 0 18px;padding:0 14px}
   .message-board-head{display:none}
   .message-list{border-radius:12px}
   .message-row-summary{min-height:94px;padding:12px 10px;grid-template-columns:28px 40px minmax(0,1fr) 20px;gap:8px}

@@ -1,0 +1,186 @@
+{
+  "id": "FhArtistRefresh01",
+  "name": "FANHEAT scheduled artist refresh",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "id": "schedule-artist-refresh",
+      "name": "Artist Refresh Schedule",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://collector-api:8080/admin/api/artist-refreshes/due",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-FANHEAT-API-KEY",
+              "value": "={{ $env.FANHEAT_INTERNAL_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "claim-due-artists",
+      "name": "Claim Due Artists",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [240, 0]
+    },
+    {
+      "parameters": {
+        "jsCode": "return ($json.items || []).map(item => ({ json: item }));"
+      },
+      "id": "split-due-artists",
+      "name": "Split Due Artists",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [480, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://collector-api:8080/admin/api/artist-imports/{{ $json.job_id }}/status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-FANHEAT-API-KEY",
+              "value": "={{ $env.FANHEAT_INTERNAL_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'running', stage: '정기 갱신 · 공식 채널 확인', progress: 10, collected_count: 0 }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "mark-refresh-running",
+      "name": "Mark Refresh Running",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://collector-api:8080/v1/artists/import/sync",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-FANHEAT-API-KEY",
+              "value": "={{ $env.FANHEAT_INTERNAL_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($('Split Due Artists').item.json) }}",
+        "options": {
+          "timeout": 600000
+        }
+      },
+      "id": "refresh-artist-data",
+      "name": "Refresh Official Artist Data",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [960, 0],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://collector-api:8080/admin/api/artist-imports/{{ $('Split Due Artists').item.json.job_id }}/status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-FANHEAT-API-KEY",
+              "value": "={{ $env.FANHEAT_INTERNAL_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'completed', stage: '정기 갱신 완료', progress: 100, collected_count: Number($json.collected || 0), artist_id: Number($json.artist_id), artist_slug: $json.slug, message: `아티스트 ${$json.slug} 정기 갱신 완료` }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "complete-artist-refresh",
+      "name": "Complete Artist Refresh",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "=http://collector-api:8080/admin/api/artist-imports/{{ $('Split Due Artists').item.json.job_id }}/status",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-FANHEAT-API-KEY",
+              "value": "={{ $env.FANHEAT_INTERNAL_API_KEY }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ status: 'failed', stage: '정기 갱신 실패', progress: 0, collected_count: 0, message: String($json.error?.message || $json.message || '아티스트 정기 갱신 중 오류가 발생했습니다.').slice(0, 1000) }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "fail-artist-refresh",
+      "name": "Fail Artist Refresh",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1200, 180]
+    }
+  ],
+  "connections": {
+    "Artist Refresh Schedule": {
+      "main": [[{"node": "Claim Due Artists", "type": "main", "index": 0}]]
+    },
+    "Claim Due Artists": {
+      "main": [[{"node": "Split Due Artists", "type": "main", "index": 0}]]
+    },
+    "Split Due Artists": {
+      "main": [[{"node": "Mark Refresh Running", "type": "main", "index": 0}]]
+    },
+    "Mark Refresh Running": {
+      "main": [[{"node": "Refresh Official Artist Data", "type": "main", "index": 0}]]
+    },
+    "Refresh Official Artist Data": {
+      "main": [
+        [{"node": "Complete Artist Refresh", "type": "main", "index": 0}],
+        [{"node": "Fail Artist Refresh", "type": "main", "index": 0}]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Seoul"
+  },
+  "active": true
+}

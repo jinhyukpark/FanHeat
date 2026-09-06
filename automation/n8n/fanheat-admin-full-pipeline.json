@@ -27,7 +27,7 @@
         "headerParameters": {"parameters": [{"name": "X-FANHEAT-API-KEY", "value": "={{ $env.FANHEAT_INTERNAL_API_KEY }}"}]},
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ source: $json.source, query: $json.query, max_results: $json.max_results, order: $json.order, published_after: $json.published_within_hours ? $now.minus({ hours: $json.published_within_hours }).toISO() : undefined, region_code: $json.region_code, language_code: $json.language_code, language_filter_mode: $json.language_filter_mode }) }}",
+        "jsonBody": "={{ JSON.stringify({ source: $json.source, query: $json.query, max_results: $json.max_results, order: $json.order, published_after: $json.published_within_hours ? $now.minus({ hours: $json.published_within_hours }).toISO() : undefined, region_code: $json.region_code, language_code: $json.language_code, language_filter_mode: $json.language_filter_mode, news_sources: $json.source === 'news' ? ($json.news_sources ?? []) : [] }) }}",
         "options": {"timeout": 120000}
       },
       "id": "collect-current-query",

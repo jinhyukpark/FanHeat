@@ -18,10 +18,22 @@
   ],
   "icons": [
     {
-      "src": "/images/fanheat-logo.png",
-      "sizes": "520x520",
+      "src": "/images/fanheat-app-icon-192.png?v=2",
+      "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
+    },
+    {
+      "src": "/images/fanheat-app-icon-512.png?v=2",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/images/fanheat-app-icon-512.png?v=2",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }

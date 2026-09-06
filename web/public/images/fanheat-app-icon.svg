@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" fill="#7857e8"/>
+  <circle cx="256" cy="256" r="186" fill="#fff"/>
+  <g transform="translate(57.6 57.6) scale(6.2)">
+    <path fill="#111014" d="M32 7.5 38.2 25h18.6L42 36.2 47.6 55 32 44.1 16.4 55 22 36.2 7.2 25h18.6L32 7.5Zm0 10.4-3.4 10.2H17.8l8.6 6.5-3.2 10.8 8.8-6.2 8.8 6.2-3.2-10.8 8.6-6.5H35.4L32 17.9Z"/>
+    <path fill="#111014" d="M10.8 26.3h42.4v9.8H10.8z"/>
+    <path fill="#fff" d="M14 28.5h36v5.4H14z"/>
+    <text x="32" y="33.1" fill="#111014" font-family="Arial,Helvetica,sans-serif" font-size="6.2" font-weight="900" text-anchor="middle" letter-spacing=".25">FANHEAT</text>
+  </g>
+</svg>
