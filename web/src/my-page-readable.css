@@ -6,6 +6,12 @@
   --fh-type-section:20px;
 }
 
+/* 사용자 음악 재생을 다시 결정할 때까지 마이페이지의 재생 진입점도 함께 숨깁니다. */
+.app.music-playback-disabled .my-cover-play,
+.app.music-playback-disabled .my-music{
+  display:none;
+}
+
 /* Final my-page type layer. Keep this import after all legacy component styles. */
 .my-page-profile,.my-page-content{font-size:var(--fh-type-body)}
 

@@ -21,6 +21,9 @@ import './star-page.css'
 import './my-page.css'
 
 const A = 'https://yuiemljibxeoifupvluc.supabase.co/storage/v1/object/public/fanheat-assets/3207765e-4d0a-4c9c-b620-46a805ca0ee7/system/'
+// 사용자 음악 재생은 서비스 방향이 확정될 때까지 임시 비활성화합니다.
+// 추후 재개할 때 이 값만 true로 변경하면 보관된 재생 UI와 로직이 다시 노출됩니다.
+const USER_MUSIC_PLAYBACK_ENABLED = false
 const assetSrc = value => /^https?:\/\//.test(value || '') || String(value || '').startsWith('/') ? value : `${A}${value}`
 const youtubeVideoId = value => {
   if (!value) return ''
@@ -281,13 +284,13 @@ function ChartPanel({ onPlay, activeSong, songPlaying = false, items = charts, a
         const rankNumber = Number(data.display_order || index + 1)
         const crownCount = dedicatedVotePage && rankNumber <= 3 ? 4 - rankNumber : 0
         const selected = voteMode ? selectedVote?.data.artist_id === data.artist_id : dedicatedVotePage && ownVote?.artist_id === data.artist_id
-        return <li key={`${data.artist_id || title}-${index}`} className={`${activeSong === index && !showVoteRanking ? 'playing' : ''} ${selected ? 'vote-selected' : ''}`.trim()}>
-        <button type="button" onClick={() => voteMode ? setSelectedVote({ title, artist, image, data }) : dedicatedVotePage ? undefined : onPlay(index)} aria-label={voteMode ? `${title} 투표 선택` : dedicatedVotePage ? `${rankNumber}위 ${title}, 현재 ${Number(dailyCounts[data.artist_id] ?? data.vote_count ?? 0).toLocaleString()}표` : `${title} 음원 선택`}>
+        return <li key={`${data.artist_id || title}-${index}`} className={`${USER_MUSIC_PLAYBACK_ENABLED && activeSong === index && !showVoteRanking ? 'playing' : ''} ${selected ? 'vote-selected' : ''}`.trim()}>
+        <button type="button" onClick={() => voteMode ? setSelectedVote({ title, artist, image, data }) : dedicatedVotePage || !USER_MUSIC_PLAYBACK_ENABLED ? undefined : onPlay(index)} aria-label={voteMode ? `${title} 투표 선택` : dedicatedVotePage ? `${rankNumber}위 ${title}, 현재 ${Number(dailyCounts[data.artist_id] ?? data.vote_count ?? 0).toLocaleString()}표` : `${rankNumber}위 ${title}, ${artist}`}>
           <span className={`rank vote-rank-${rankNumber}`}>
             {crownCount > 0 && <span className="rank-crowns" aria-hidden="true">{Array.from({ length: crownCount }, (_, crownIndex) => <span key={crownIndex}>👑</span>)}</span>}
             <span>{String(rankNumber).padStart(2, '0')}</span>
           </span>
-          <span className="cover"><img src={assetSrc(image)} alt={`${title} 커버`} /><b className={`compact-rank rank-${index + 1}`}>{index + 1}위</b><i>{activeSong === index && songPlaying ? 'Ⅱ' : '▶'}</i></span>
+          <span className="cover"><img src={assetSrc(image)} alt={`${title} 커버`} /><b className={`compact-rank rank-${index + 1}`}>{index + 1}위</b>{USER_MUSIC_PLAYBACK_ENABLED && <i>{activeSong === index && songPlaying ? 'Ⅱ' : '▶'}</i>}</span>
           <span className="song"><strong>{localizeTitle(title)}</strong><small>{artist}</small></span>
           {showVoteRanking && <span className="vote-score"><small>SCORE</small><strong>{Number(dailyCounts[data.artist_id] ?? data.vote_count ?? 0).toLocaleString()}</strong></span>}
           {showVoteRanking && <span className={`vote-check ${selected ? 'selected' : ''}`}>✓</span>}
@@ -523,6 +526,7 @@ function UnifiedAudioPlayer({ track, playing, onPlayingChange, onPrevious, onNex
     frame = window.requestAnimationFrame(syncProgress)
     return () => window.cancelAnimationFrame(frame)
   }, [playing, audioUrl, track?.id])
+  if (!USER_MUSIC_PLAYBACK_ENABLED) return null
   const toggle = () => {
     const node = audio.current
     if (!node) return
@@ -2277,8 +2281,20 @@ function AuthModal({ onClose }) {
   }
   const oauth = async provider => {
     setPending(true); setMessage('')
-    const { error } = await supabase.auth.signInWithOAuth({ provider, options: { redirectTo: window.location.origin } })
-    if (error) { setMessage(error.message); setPending(false) }
+    try {
+      if (!supabase) throw new Error('로그인 서비스 설정을 확인해 주세요.')
+      const options = {
+        redirectTo: `${window.location.origin}/`,
+        ...(provider === 'google' ? { scopes: 'openid email profile', queryParams: { prompt: 'select_account' } } : {}),
+      }
+      const { error } = await supabase.auth.signInWithOAuth({ provider, options })
+      if (error) throw error
+    } catch (cause) {
+      const providerName = provider === 'google' ? 'Google' : '카카오'
+      const providerDisabled = /provider.*(disabled|not enabled|not supported)|unsupported provider/i.test(cause?.message || '')
+      setMessage(providerDisabled ? `${providerName} 로그인이 아직 서버에서 활성화되지 않았습니다. 잠시 후 다시 시도해 주세요.` : cause?.message || `${providerName} 로그인을 시작하지 못했습니다.`)
+      setPending(false)
+    }
   }
   return <div className="auth-overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && onClose()}>
     <section className="auth-modal" role="dialog" aria-modal="true" aria-labelledby="auth-title">
@@ -2295,8 +2311,8 @@ function AuthModal({ onClose }) {
         </form>
         {message && <p className="auth-message">{message}</p>}
         <div className="auth-divider"><span>{t('or')}</span></div>
-        <button className="social-auth google" onClick={() => oauth('google')} disabled={pending}><img src={`${A}google-g.svg`} alt="" /> {t('google')}</button>
-        <button className="social-auth kakao" onClick={() => oauth('kakao')} disabled={pending}><img src={`${A}kakao-talk.svg`} alt="" /> {t('kakao')}</button>
+        <button className="social-auth google" type="button" onClick={() => oauth('google')} disabled={pending}><img src={`${A}google-g.svg`} alt="" /> {t('google')}</button>
+        <button className="social-auth kakao" type="button" onClick={() => oauth('kakao')} disabled={pending}><img src={`${A}kakao-talk.svg`} alt="" /> {t('kakao')}</button>
         <p className="auth-switch">{mode === 'login' ? t('noAccount') : t('haveAccount')} <button onClick={() => setMode(current => current === 'login' ? 'signup' : 'login')}>{mode === 'login' ? t('signup') : t('login')}</button></p>
         <p className="auth-terms">{t('terms')}</p>
       </div>
@@ -2633,7 +2649,7 @@ function FanHeatApp() {
   }
   const mobileActive = mobileVoteOpen ? 'vote' : writing ? 'write' : myPage ? 'my' : artistDirectory || selectedStar ? 'artists' : 'home'
   const openArtistDirectory = () => { setMobileVoteOpen(false); setWriting(false); setEditingPost(null); setSelectedPost(null); setSelectedStar(null); setSelectedFan(null); setMyPage(false); setQuery(''); setArtistDirectory(true) }
-  return <div className={`app ${mobileVoteOpen ? 'mobile-vote-page-open' : ''} ${myPage ? `my-page-view my-page-mobile-${myPageMobileSection} ${myPageMobileSection === 'profile' ? 'my-page-mobile-profile' : 'my-page-mobile-content'}` : ''}`} id="top" onScrollCapture={revealTransientScrollbar}>
+  return <div className={`app ${USER_MUSIC_PLAYBACK_ENABLED ? '' : 'music-playback-disabled'} ${mobileVoteOpen ? 'mobile-vote-page-open' : ''} ${myPage ? `my-page-view my-page-mobile-${myPageMobileSection} ${myPageMobileSection === 'profile' ? 'my-page-mobile-profile' : 'my-page-mobile-content'}` : ''}`} id="top" onScrollCapture={revealTransientScrollbar}>
     {writing
       ? <div className="detail-shell compose-shell"><ComposerPreview draft={draft} images={draftImages} /></div>
       : selectedPost
@@ -2644,7 +2660,7 @@ function FanHeatApp() {
       ? <MyPageProfile user={user} profile={selectedFan} tracks={home.tracks} onBack={goHome} />
       : <div className={`left-shell ${chartCollapsed ? 'chart-collapsed' : ''}`} id="chart"><ChartPanel onPlay={setSongIndex} activeSong={songIndex} songPlaying={songPlaying} items={home.tracks} artists={home.artists} collapsed={chartCollapsed} onToggle={() => setChartCollapsed(value => !value)} user={user} onLogin={() => setAuthOpen(true)} /><Hero user={user} onLogin={() => setAuthOpen(true)} /></div>}
     <main className={`content ${writing ? 'writing-content' : ''} ${selectedStar ? 'star-content' : ''} ${myPage ? 'my-content' : ''} ${artistDirectory ? 'artist-directory-content' : ''}`}><SharedHeader {...{query, setQuery, menuOpen, setMenuOpen, writing, user, unreadMessageCount, searchFilters, setSearchFilters, filterAuthors}} loggedIn={Boolean(user)} onLogin={() => setAuthOpen(true)} onWrite={openWriter} onHome={goHome} onMyPage={openMyPage} onLogout={logout} />{dataNotice && <div className="data-notice">{dataNotice}</div>}{writing ? <WriteEditor draft={draft} setDraft={setDraft} images={draftImages} setImages={setDraftImages} imageFiles={draftImageFiles} setImageFiles={setDraftImageFiles} inlineImages={draftInlineImages} setInlineImages={setDraftInlineImages} inlineImageFiles={draftInlineImageFiles} setInlineImageFiles={setDraftInlineImageFiles} onClose={closeWriter} onPublish={submitPost} editing={Boolean(editingPost)} /> : selectedStar ? <StarPage star={selectedStar} onOpenFan={openFanPage} onClose={goHome} user={user} onLogin={() => setAuthOpen(true)} /> : myPage ? <MyPageContent user={user} publicProfile={selectedFan} posts={home.posts} followers={home.awards} unreadMessageCount={unreadMessageCount} initialTab={myPageTab} onUnreadChange={setUnreadMessageCount} onOpenFriend={openFanPage} onSelect={post => { setMyPage(false); setSelectedFan(null); setSelectedPost(post) }} /> : artistDirectory ? <ArtistDirectory items={(home.artists.length ? home.artists.map((artist, index) => { const matched = home.awards.find(([name]) => name === (artist.name_ko || artist.name)); return [artist.name_ko || artist.name, matched?.[1] || 'FAN HEAT', artist.image_url || matched?.[2] || highResolutionFallbacks[index % highResolutionFallbacks.length], artist] }) : home.awards)} query={query} setQuery={setQuery} onClose={() => { setArtistDirectory(false); setQuery('') }} onSelect={star => { setArtistDirectory(false); setSelectedPost(null); setSelectedStar(star) }} /> : <><Awards items={home.awards} onViewAll={() => { setQuery(''); setArtistDirectory(true) }} onSelect={star => { setSelectedPost(null); setSelectedStar(star) }} /><Feed query={query} filters={searchFilters} onSelect={setSelectedPost} items={home.posts} user={user} onLogin={() => setAuthOpen(true)} onHeatChange={updatePostHeat} /></>}</main>
-    {!writing && !selectedPost && !myPage && <Player songIndex={songIndex} onSelectSong={setSongIndex} onPlayingChange={setSongPlaying} onClose={() => { setSongPlaying(false); setSongIndex(null) }} items={home.tracks} />}
+    {USER_MUSIC_PLAYBACK_ENABLED && !writing && !selectedPost && !myPage && <Player songIndex={songIndex} onSelectSong={setSongIndex} onPlayingChange={setSongPlaying} onClose={() => { setSongPlaying(false); setSongIndex(null) }} items={home.tracks} />}
     {myPage && !selectedFan && <MobileMyPageTabs active={myPageMobileSection} unreadMessageCount={unreadMessageCount} onSelect={selectMyPageMobileSection} onBack={goHome} />}
     {mobileVoteOpen && <MobileVotePage onClose={goHome} onPlay={setSongIndex} activeSong={songIndex} items={home.tracks} artists={home.artists} user={user} onLogin={() => { setMobileVoteOpen(false); setAuthOpen(true) }} />}
     <MobileAppNav active={mobileActive} hidden={Boolean(selectedPost) || (!mobileNavVisible && !mobileVoteOpen)} onHome={goHome} onArtists={openArtistDirectory} onVote={() => { if (user) { setMobileNavVisible(true); setMobileVoteOpen(true); window.scrollTo({ top: 0 }) } else setAuthOpen(true) }} onWrite={() => { setMobileVoteOpen(false); openWriter() }} onMyPage={() => { setMobileVoteOpen(false); openMyPage() }} />
