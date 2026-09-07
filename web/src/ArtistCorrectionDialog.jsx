@@ -151,7 +151,7 @@ export default function ArtistCorrectionDialog({ artist, onClose }) {
               <span className="correction-upload-icon"><UploadIcon /></span>
               <strong>{dragging ? '이미지를 여기에 놓아주세요' : '이미지를 끌어다 놓으세요'}</strong>
               <span>또는 클릭해서 파일 선택</span>
-              <small>JPG, PNG, WebP · 장당 최대 5MB · 최대 5장</small>
+              <small>JPG, PNG, WebP · 장당 최대 10MB · 최대 5장</small>
             </button>
           </div>
 

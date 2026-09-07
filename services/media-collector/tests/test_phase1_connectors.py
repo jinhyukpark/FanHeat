@@ -3,8 +3,55 @@ from datetime import datetime, timezone
 import httpx
 
 from media_collector.connectors.news import NewsConnector
+from media_collector.connectors.tiktok import TikTokConnector
 from media_collector.connectors.x import XConnector
 from media_collector.schemas import CollectionRequest, NewsSourceSetting, Source
+
+
+def test_tiktok_research_search_maps_public_video_and_cursor():
+    captured = {}
+    payload = {
+        "data": {
+            "videos": [{
+                "id": 7420000000000000001,
+                "video_description": "IVE dance challenge #아이브",
+                "create_time": 1788573600,
+                "region_code": "KR",
+                "username": "ive.official",
+                "view_count": 1200,
+                "like_count": 90,
+                "comment_count": 8,
+                "share_count": 4,
+                "hashtag_names": ["아이브"],
+            }],
+            "cursor": 1,
+            "search_id": "search-1",
+            "has_more": True,
+        },
+        "error": {"code": "ok", "message": ""},
+    }
+
+    def transport(request):
+        captured["authorization"] = request.headers.get("authorization")
+        captured["body"] = request.read().decode()
+        return httpx.Response(200, json=payload)
+
+    client = httpx.Client(transport=httpx.MockTransport(transport))
+    page = TikTokConnector("approved-token", client=client).collect(CollectionRequest(
+        source=Source.TIKTOK,
+        query="아이브",
+        region_code="KR",
+        published_after=datetime(2026, 9, 1, tzinfo=timezone.utc),
+        published_before=datetime(2026, 9, 7, tzinfo=timezone.utc),
+    ))
+
+    assert captured["authorization"] == "Bearer approved-token"
+    assert '"field_name":"keyword"' in captured["body"].replace(" ", "")
+    assert page.items[0].source == Source.TIKTOK
+    assert page.items[0].author.handle == "ive.official"
+    assert page.items[0].url == "https://www.tiktok.com/@ive.official/video/7420000000000000001"
+    assert page.items[0].metrics.shares == 4
+    assert page.next_cursor == '{"cursor": 1, "search_id": "search-1"}'
 
 
 def test_x_recent_search_maps_metrics_and_cursor():

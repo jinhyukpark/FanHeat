@@ -1,4 +1,5 @@
 import json
+import inspect
 from datetime import datetime, timezone
 from contextlib import contextmanager
 from types import SimpleNamespace
@@ -166,6 +167,28 @@ def test_comment_actions_include_only_earlier_reply_targets():
     assert any(action["parent_action_id"] is not None for action in actions)
 
 
+def test_human_comments_schedule_ai_reply_actions_instead_of_cancelling_plans():
+    engine = _FakeEngine([[{"comment_id": "comment-id", "plan_id": "plan-id", "persona_id": "persona-id"}], None, None])
+    service = PublicationService(engine, None, None)
+
+    scheduled = service._schedule_human_comment_replies(30)
+
+    statements = [statement for statement, _ in engine.connection.statements]
+    assert scheduled == 1
+    assert "human_profile.is_ai is false" in statements[0]
+    assert "ai_reply.parent_id = human_comment.id" in statements[0]
+    assert "target_comment_id" in statements[1]
+    assert "set status = 'active'" in statements[2]
+
+
+def test_engagement_flow_no_longer_cancels_when_a_human_comments():
+    source = inspect.getsource(PublicationService._execute_engagement_action)
+    process_source = inspect.getsource(PublicationService._process_due_engagement_actions)
+
+    assert "human comment detected" not in source
+    assert "_cancel_human_blocked_plans" not in process_source
+
+
 def test_comment_auto_approval_respects_global_switch():
     assert PublicationService._comment_draft_status(False, [], 0.99) == "review"
     assert PublicationService._comment_draft_status(True, [], 0.8) == "approved"
@@ -248,3 +271,27 @@ def test_assign_profile_is_idempotent_when_already_linked():
     assert result["reassigned"] is False
     assert result["profile_id"] == "profile-id"
     assert len(engine.connection.statements) == 1
+
+
+def test_daily_ai_votes_are_idempotent_and_only_use_enabled_ai_profiles():
+    summary = {
+        "vote_date": "2026-09-07",
+        "eligible_ai_profiles": 50,
+        "active_artists": 3,
+        "already_voted": 2,
+        "votes_created": 48,
+        "unassigned_profiles": 0,
+    }
+    engine = _FakeEngine([summary])
+    service = PublicationService(engine, None, None)
+
+    result = service.cast_daily_ai_votes()
+
+    statement, parameters = engine.connection.statements[0]
+    assert result == summary
+    assert parameters == {}
+    assert "profile.is_ai is true" in statement
+    assert "persona.enabled is true" in statement
+    assert "artist.active is true" in statement
+    assert "on conflict (user_id, vote_date) do nothing" in statement
+    assert "Asia/Seoul" in statement

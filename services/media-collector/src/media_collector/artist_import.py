@@ -142,6 +142,51 @@ def _claim_values(entity: dict, property_id: str) -> list[str]:
     return values
 
 
+def _claim_entity_ids(entity: dict, property_id: str) -> set[str]:
+    ids = set()
+    for claim in entity.get("claims", {}).get(property_id, []):
+        value = claim.get("mainsnak", {}).get("datavalue", {}).get("value")
+        if isinstance(value, dict) and isinstance(value.get("id"), str):
+            ids.add(value["id"])
+    return ids
+
+
+def _current_claim_entity_ids(entity: dict, property_id: str) -> set[str]:
+    ids = set()
+    for claim in entity.get("claims", {}).get(property_id, []):
+        if claim.get("rank") == "deprecated" or claim.get("qualifiers", {}).get("P582"):
+            continue
+        value = claim.get("mainsnak", {}).get("datavalue", {}).get("value")
+        if isinstance(value, dict) and isinstance(value.get("id"), str):
+            ids.add(value["id"])
+    return ids
+
+
+def _claim_raw_values(entity: dict, property_id: str) -> list:
+    return [claim.get("mainsnak", {}).get("datavalue", {}).get("value")
+            for claim in entity.get("claims", {}).get(property_id, [])
+            if claim.get("mainsnak", {}).get("datavalue", {}).get("value") is not None]
+
+
+def _localized_claim_text(entity: dict, property_id: str, language: str) -> str | None:
+    values = _claim_raw_values(entity, property_id)
+    localized = next((value.get("text") for value in values
+                      if isinstance(value, dict) and value.get("language") == language and value.get("text")), None)
+    return localized or next((value.get("text") for value in values
+                              if isinstance(value, dict) and value.get("text")), None)
+
+
+def _claim_date(entity: dict, *property_ids: str) -> str | None:
+    for property_id in property_ids:
+        for value in _claim_raw_values(entity, property_id):
+            raw = value.get("time", "") if isinstance(value, dict) else ""
+            match = re.match(r"^[+-](\d{4})-(\d{2})-(\d{2})", raw)
+            if match:
+                year, month, day = match.groups()
+                return year if month == "00" else f"{year}-{month}" if day == "00" else f"{year}-{month}-{day}"
+    return None
+
+
 def _commons_source_url(entity: dict, artist_name: str) -> str:
     category = next(iter(_claim_values(entity, "P373")), "")
     title = entity.get("sitelinks", {}).get("commonswiki", {}).get("title", "")
@@ -152,15 +197,58 @@ def _commons_source_url(entity: dict, artist_name: str) -> str:
     return "https://commons.wikimedia.org/wiki/Special:MediaSearch?type=image&search=" + quote(artist_name)
 
 
-def search_artist_candidates(artist_name: str, language_code: str = "ko", timeout: float = 20) -> list[dict]:
+COUNTRY_ENTITY_IDS = {
+    "KR": {"Q884"},
+    "JP": {"Q17"},
+    "US": {"Q30"},
+    "GB": {"Q145"},
+}
+
+
+def source_url_region(url: str) -> str | None:
+    """Return a region only when a URL is explicitly localized."""
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").casefold()
+    value = f"{hostname}{parsed.path.casefold()}"
+    if hostname.endswith(".jp") or re.search(r"(?:^|[._/-])(?:jp|japan|japanese)(?:[._/-]|$)", value):
+        return "JP"
+    if hostname.endswith(".kr") or re.search(r"(?:^|[._/-])(?:kr|korea|korean)(?:[._/-]|$)", value):
+        return "KR"
+    if hostname.endswith(".uk") or re.search(r"(?:^|[._/-])(?:uk|britain|british)(?:[._/-]|$)", value):
+        return "GB"
+    return None
+
+
+def source_url_allowed_for_region(url: str, country_code: str) -> bool:
+    explicit_region = source_url_region(url)
+    return explicit_region is None or explicit_region == country_code
+
+
+def search_artist_candidates(
+    artist_name: str,
+    language_code: str = "ko",
+    timeout: float = 20,
+    *,
+    country_code: str = "KR",
+    search_region: str = "domestic",
+) -> list[dict]:
     """Identity preview only: never creates a job or picks a result automatically."""
     language = language_code.split('-')[0]
+    search_languages = [language]
+    if search_region == "global":
+        search_languages.extend(["en", "ko", "ja"])
+    search_languages = list(dict.fromkeys(search_languages))
     with httpx.Client(timeout=timeout, headers={"User-Agent": "FANHEAT-Artist-Collector/1.0"}) as client:
-        response = client.get('https://www.wikidata.org/w/api.php', params={
-            'action': 'wbsearchentities', 'search': artist_name, 'language': language,
-            'uselang': language, 'format': 'json', 'limit': 8, 'type': 'item'})
-        response.raise_for_status()
-        hits = [h for h in response.json().get('search', []) if re.fullmatch(r'Q\d+', h.get('id', ''))]
+        hits_by_id = {}
+        for search_language in search_languages:
+            response = client.get('https://www.wikidata.org/w/api.php', params={
+                'action': 'wbsearchentities', 'search': artist_name, 'language': search_language,
+                'uselang': language, 'format': 'json', 'limit': 8, 'type': 'item'})
+            response.raise_for_status()
+            for hit in response.json().get('search', []):
+                if re.fullmatch(r'Q\d+', hit.get('id', '')):
+                    hits_by_id.setdefault(hit['id'], hit)
+        hits = list(hits_by_id.values())[:16]
         if not hits:
             return []
         response = client.get('https://www.wikidata.org/w/api.php', params={
@@ -168,9 +256,23 @@ def search_artist_candidates(artist_name: str, language_code: str = "ko", timeou
             'props': 'labels|descriptions|claims|sitelinks', 'languages': f'{language}|en', 'sitefilter': 'commonswiki', 'format': 'json'})
         response.raise_for_status()
         entities = response.json().get('entities', {})
+        related_ids = set()
+        for entity in entities.values():
+            for property_id in ("P106", "P108", "P264"):
+                related_ids.update(_claim_entity_ids(entity, property_id))
+        related_entities = {}
+        if related_ids:
+            response = client.get('https://www.wikidata.org/w/api.php', params={
+                'action': 'wbgetentities', 'ids': '|'.join(sorted(related_ids)), 'props': 'labels',
+                'languages': f'{language}|en|ko|ja', 'format': 'json'})
+            response.raise_for_status()
+            related_entities = response.json().get('entities', {})
     candidates = []
+    preferred_country_ids = COUNTRY_ENTITY_IDS.get(country_code, set())
     for hit in hits:
         entity = entities.get(hit['id'], {})
+        entity_country_ids = _claim_entity_ids(entity, "P27") | _claim_entity_ids(entity, "P495")
+        country_match = bool(preferred_country_ids & entity_country_ids)
         urls = []
         for prop, builder in WIKIDATA_SOCIAL_CLAIMS.items():
             for value in _claim_values(entity, prop):
@@ -180,14 +282,41 @@ def search_artist_candidates(artist_name: str, language_code: str = "ko", timeou
                     url = parsed._replace(scheme='https').geturl()
                 if urlparse(url).scheme == 'https':
                     urls.append(url)
+        if search_region == "domestic":
+            urls = [url for url in urls if source_url_allowed_for_region(url, country_code)]
         labels = entity.get('labels', {})
         descriptions = entity.get('descriptions', {})
+        def related_labels(property_ids, *, current=False):
+            values = []
+            for property_id in property_ids:
+                claim_ids = _current_claim_entity_ids(entity, property_id) if current else _claim_entity_ids(entity, property_id)
+                for entity_id in claim_ids:
+                    related = related_entities.get(entity_id, {}).get('labels', {})
+                    label = (related.get(language, {}) or related.get('ko', {}) or related.get('en', {}) or {}).get('value')
+                    if label:
+                        values.append(label)
+            return list(dict.fromkeys(values))
+        agency_labels = related_labels(('P108', 'P264'), current=True)
+        profile_facts = {
+            'official_name': _localized_claim_text(entity, 'P1448', language),
+            'real_name': (_localized_claim_text(entity, 'P1477', language)
+                          or ((labels.get(language, {}) or labels.get('ko', {})).get('value')
+                              if 'Q5' in _claim_entity_ids(entity, 'P31') else None)),
+            'debut_text': _claim_date(entity, 'P2031', 'P571'),
+            'role_description': ' · '.join(related_labels(('P106',))) or None,
+            'agency': agency_labels[0] if len(agency_labels) == 1 else None,
+            'agency_candidates': agency_labels,
+        }
         candidates.append({'id': hit['id'], 'label': labels.get(language, {}).get('value') or hit.get('label') or hit['id'],
             'english_name': labels.get('en', {}).get('value'),
             'description': descriptions.get(language, {}).get('value') or descriptions.get('en', {}).get('value') or hit.get('description') or '설명 정보 없음',
             'entity_url': f"https://www.wikidata.org/wiki/{hit['id']}",
             'commons_source_url': _commons_source_url(entity, artist_name),
-            'official_source_urls': list(dict.fromkeys(urls))[:20]})
+            'official_source_urls': list(dict.fromkeys(urls))[:20],
+            'profile_facts': profile_facts,
+            'country_match': country_match})
+    if search_region == "domestic":
+        candidates.sort(key=lambda candidate: not candidate['country_match'])
     return candidates
 
 
@@ -434,6 +563,85 @@ def _music_albums(pages: list[dict], limit: int) -> list[dict]:
     return albums
 
 
+def _save_artist_albums(db: Session, artist_id: int, albums: list[dict], scopes: set[str], active: bool) -> tuple[int, int]:
+    from .artist_catalog import youtube_id
+    album_count = track_count = 0
+    if not scopes & {"albums", "tracks"}:
+        return album_count, track_count
+    for index, album in enumerate(albums, 1):
+        album_row = db.execute(text("select id from public.artist_albums where artist_id=:artist_id and title=:title"), {"artist_id": artist_id, "title": album["title"]}).first()
+        if album_row:
+            album_id = album_row.id
+            db.execute(text("""update public.artist_albums set cover_url=coalesce(cover_url,:cover),
+                external_url=coalesce(external_url,:source), release_date=coalesce(release_date,cast(:released as date)),
+                track_count=greatest(coalesce(track_count,0),:count) where id=:id"""),
+                {"id": album_id, "cover": album.get("cover_url"), "source": album["external_url"],
+                 "released": album.get("release_date"), "count": len(album["tracks"])})
+        else:
+            album_id = db.execute(text("""
+                insert into public.artist_albums
+                  (artist_id,title,release_date,track_count,cover_url,external_url,album_type,active,display_order)
+                values (:artist_id,:title,cast(:release_date as date),:track_count,:cover_url,:external_url,:album_type,:active,:display_order)
+                returning id
+            """), {"artist_id": artist_id, "title": album["title"], "release_date": album["release_date"], "track_count": len(album["tracks"]), "cover_url": album["cover_url"], "external_url": album["external_url"], "album_type": album.get("album_type") or "미확인", "active": active, "display_order": index}).scalar_one()
+            album_count += 1
+        if "tracks" in scopes:
+            for track_index, track in enumerate(album["tracks"], 1):
+                inserted = db.execute(text("""
+                    insert into public.artist_album_tracks
+                      (album_id,track_number,title,duration_text,youtube_url,active,display_order)
+                    values (:album_id,:track_number,:title,:duration_text,:youtube_url,:active,:display_order)
+                    on conflict (album_id,track_number) do update
+                      set youtube_url=coalesce(artist_album_tracks.youtube_url,excluded.youtube_url)
+                      where artist_album_tracks.title=excluded.title returning id
+                """), {"album_id": album_id, "track_number": track_index, "title": track["title"], "duration_text": track["duration"], "youtube_url": track["url"] if youtube_id(track.get("url") or "") else None, "active": active, "display_order": track_index}).first()
+                track_count += int(inserted is not None)
+    return album_count, track_count
+
+
+def _official_fandom_name(pages: list[dict]) -> str | None:
+    patterns = (
+        r"팬덤명\s*[:：]\s*([A-Za-z0-9가-힣][A-Za-z0-9가-힣 .'-]{1,38})",
+        r"official\s+fandom\s+name\s*[:：]\s*([A-Za-z0-9][A-Za-z0-9 .'-]{1,38})",
+    )
+    for page in pages:
+        host = (urlparse(page.get("url", "")).hostname or "").removeprefix("www.")
+        if host in SOCIAL_DOMAINS or "youtube.com" in host:
+            continue
+        text_value = re.sub(r"<[^>]+>", " ", page.get("html", ""))
+        for pattern in patterns:
+            match = re.search(pattern, text_value, re.I)
+            if match:
+                return re.sub(r"\s+", " ", match.group(1)).strip(" .")
+    return None
+
+
+def _direct_socials(urls: list[str]) -> dict[str, str]:
+    values = {}
+    for url in urls:
+        host = (urlparse(url).hostname or "").casefold().removeprefix("www.").removeprefix("m.")
+        for domain, field in SOCIAL_DOMAINS.items():
+            if host == domain or host.endswith("." + domain):
+                values.setdefault(field, url)
+    return values
+
+
+def _fill_missing_artist_profile(db: Session, artist_id: int, values: dict) -> None:
+    db.execute(text("""
+        update public.artists set
+          name=case when nullif(name,'') is null or name=name_ko then coalesce(:name,name) else name end,
+          name_ko=coalesce(nullif(name_ko,''),:name_ko),
+          real_name=coalesce(nullif(real_name,''),:real_name),
+          role_description=coalesce(nullif(role_description,''),:role_description),
+          debut_text=coalesce(nullif(debut_text,''),:debut_text),
+          agency=coalesce(nullif(agency,''),:agency), fandom_name=coalesce(nullif(fandom_name,''),:fandom_name),
+          facebook_url=coalesce(nullif(facebook_url,''),:facebook_url),
+          x_url=coalesce(nullif(x_url,''),:x_url),
+          instagram_url=coalesce(nullif(instagram_url,''),:instagram_url), updated_at=now()
+        where id=:artist_id
+    """), values | {"artist_id": artist_id})
+
+
 def import_artist(db: Session, request: dict) -> dict:
     from .gallery_vision import classify_gallery, save_gallery_candidates, representative_photo
     from .artist_writing import draft_artist_sections, save_artist_sections
@@ -441,24 +649,40 @@ def import_artist(db: Session, request: dict) -> dict:
     from .config import get_settings
     from .commons_gallery import collect_commons_candidates
     logs = ImportLog(db, request.get("job_id"))
+    settings = get_settings()
     logs.append("공식 출처 수집 시작")
     pages = collect_artist_sources(request.get("official_source_urls", []), logs=logs)
     artist_name = request["artist_name"].strip()
     slug = request.get("existing_artist_slug") or _slug(artist_name)
     scopes = set(request.get("scopes", []))
     aliases = list(dict.fromkeys(filter(None, [artist_name, (request.get("candidate") or {}).get("label"), request.get("existing_artist_slug")])))
-    profile, official_socials, news = profile_and_news(pages, aliases, get_settings(), logs)
+    official_youtube_url = request.get("official_youtube_url") or next(
+        (url for url in request.get("official_source_urls", [])
+         if re.match(r"^https://(?:www\.|m\.)?youtube\.com/(?:@|channel/|c/|user/)", url, re.I)),
+        None,
+    )
+    profile, official_socials, news = profile_and_news(pages, aliases, settings, logs)
+    direct_socials = _direct_socials(request.get("official_source_urls", []))
+    for platform, field in (("facebook", "facebook_url"), ("x", "x_url"), ("instagram", "instagram_url")):
+        if direct_socials.get(field):
+            official_socials.setdefault(platform, {"url": direct_socials[field], "evidence_url": direct_socials[field]})
+    profile_facts = dict((request.get("candidate") or {}).get("profile_facts") or {})
+    profile.update({key: value for key, value in profile_facts.items() if value and not profile.get(key)})
     albums, limited, video_limited, linked = [], False, False, 0
     if scopes & {"albums", "tracks"}:
         albums, pages, limited = crawl_catalog(pages, min(request.get("album_limit", 50), 100), logs)
         if "tracks" in scopes:
-            linked, video_limited = connect_youtube(albums, pages, get_settings().youtube_api_key, aliases, logs,
-                                                   region=request.get("country_code", "KR"))
-    writing = draft_artist_sections(request, pages, profile, news, get_settings(), logs)
+            linked, video_limited = connect_youtube(
+                albums, pages, settings.youtube_api_key, aliases, logs,
+                region=request.get("country_code", "KR"),
+                official_youtube_url=official_youtube_url,
+                settings=settings,
+            )
+    writing = draft_artist_sections(request, pages, profile, news, settings, logs)
     gallery_pages = collect_gallery_pages(pages, logs) if scopes & {'gallery', 'profile'} else pages
     commons_limit = min(max(int(request.get('gallery_limit', 40)) // 2, 1), 12)
     commons = collect_commons_candidates((request.get('candidate') or {}).get('id'), commons_limit, logs) if scopes & {'gallery', 'profile'} else []
-    gallery_review = classify_gallery(request, gallery_pages, get_settings(), logs, commons) if scopes & {'gallery', 'profile'} else {}
+    gallery_review = classify_gallery(request, gallery_pages, settings, logs, commons) if scopes & {'gallery', 'profile'} else {}
     portrait = representative_photo(gallery_review) if 'profile' in scopes else None
     logs.append('대표 사진 후보 확인 · 관리자 지정 이미지는 유지: ' + portrait['image_url'] if portrait else '대표 사진 미확인 · 임의 배너/로고 사용 안 함, 관리자 선택 필요')
     missing = []
@@ -476,11 +700,12 @@ def import_artist(db: Session, request: dict) -> dict:
         missing.append(f"공식 영상 미연결 {track_total-linked}곡")
     if limited or video_limited:
         missing.append("탐색 한도/외부 오류로 추가 확인 필요")
-    # These scopes are not supported by a structured adapter yet. Do not
-    # disguise page metadata or arbitrary image URLs as verified completion.
-    for scope, label in [("profile", "데뷔·소속사·팬덤 검증"), ("gallery", "갤러리 원본 검증·서버 저장")]:
-        if scope in scopes:
-            missing.append(label + " 보완 필요")
+    if "profile" in scopes:
+        for field, label in (("debut_text", "데뷔"), ("agency", "소속사"), ("role_description", "활동 분야")):
+            if not profile_facts.get(field) and not (field == "debut_text" and profile.get("debut_date")):
+                missing.append(label + " 공식 근거 미확인")
+    if "gallery" in scopes:
+        missing.append("갤러리 원본 검증·서버 저장 보완 필요")
     report = {"quality": "partial" if missing else "complete", "missing": missing,
               "albums_found": len(albums), "tracks_found": track_total, "youtube_linked": linked,
               "sources_checked": len(pages), "checked_at": datetime.now(timezone.utc).isoformat(),
@@ -493,31 +718,45 @@ def import_artist(db: Session, request: dict) -> dict:
     descriptions = [page["description"] for page in pages if page["description"]]
     socials = {field: official_socials[platform]['url'] for platform, field in
                [('facebook','facebook_url'),('x','x_url'),('instagram','instagram_url')] if platform in official_socials}
+    socials = _direct_socials(request.get("official_source_urls", [])) | socials
+    fandom_name = _official_fandom_name(pages)
+    real_name = profile_facts.get("real_name") or profile_facts.get("official_name")
     active = not request.get("review_before_publish", True)
+    values = {
+        "slug": slug,
+        "name": (request.get("candidate") or {}).get("english_name") or artist_name,
+        "name_ko": (request.get("candidate") or {}).get("label") or artist_name,
+        "real_name": real_name if "profile" in scopes else None,
+        "role_description": profile_facts.get("role_description") if "profile" in scopes else None,
+        "debut_text": (profile.get('debut_date') or profile_facts.get("debut_text")) if "profile" in scopes else None,
+        "agency": profile_facts.get("agency") if "profile" in scopes else None,
+        "fandom_name": fandom_name if "profile" in scopes else None,
+        "description": descriptions[0] if descriptions and "biography" in scopes else None,
+        "image_url": portrait['image_url'] if portrait else None,
+        "hero_image_url": portrait['image_url'] if portrait else None,
+        "facebook_url": socials.get("facebook_url") if "socials" in scopes else None,
+        "x_url": socials.get("x_url") if "socials" in scopes else None,
+        "instagram_url": socials.get("instagram_url") if "socials" in scopes else None,
+        "active": active,
+    }
     row = db.execute(text("select id,active from public.artists where slug = :slug"), {"slug": slug}).first()
     if row and row.active and request.get("review_before_publish", True):
         report['publication'] = 'review_pending'
         report['missing'].append('기존 공개 데이터 보호 · 새 수집 결과는 근거 보고서에서 검토 필요')
         report['quality'] = 'partial'
         db.rollback()
+        _fill_missing_artist_profile(db, row.id, values)
         gallery_count = save_gallery_candidates(db, row.id, gallery_review) if 'gallery' in scopes else 0
+        album_count, saved_track_count = _save_artist_albums(db, row.id, albums, scopes, active=False)
         db.commit()
-        logs.append('공개 중인 아티스트는 덮어쓰지 않고 수집 결과를 검토 보고서로 전달합니다.')
+        logs.append('공개 중인 아티스트 정보는 덮어쓰지 않고 새 앨범·곡은 비공개 검토 상태로 저장합니다.')
         logs.append(f'갤러리 확인 후보 {gallery_count}개를 슈퍼 관리자 검토함에 저장했습니다.')
+        logs.append(f'앨범 검토 후보 {album_count}개 · 곡 {saved_track_count}개를 저장했습니다.')
         return {"artist_id": row.id, "slug": slug, "sources": len(pages), "gallery": gallery_count,
-                "albums": len(albums), "tracks": track_total, "collected": gallery_count, "report": report, "logs": list(logs)[-20:]}
-    values = {
-        "slug": slug, "name": artist_name, "name_ko": artist_name,
-        "description": descriptions[0] if descriptions and "biography" in scopes else None,
-        "image_url": portrait['image_url'] if portrait else None,
-        "hero_image_url": portrait['image_url'] if portrait else None,
-        "facebook_url": socials.get("facebook_url") if "socials" in scopes else None,
-        "x_url": socials.get("x_url") if "socials" in scopes else None,
-        "instagram_url": socials.get("instagram_url") if "socials" in scopes else None, "active": active,
-        "debut_text": profile.get('debut_date') if 'profile' in scopes else None,
-    }
+                "albums": len(albums), "tracks": track_total, "collected": gallery_count + album_count + saved_track_count, "report": report, "logs": list(logs)[-20:]}
     if row:
         artist_id = row.id
+        _fill_missing_artist_profile(db, artist_id, values)
         db.execute(text("""
             update public.artists set name_ko=coalesce(name_ko,:name_ko),
               description=coalesce(description,:description),
@@ -530,47 +769,14 @@ def import_artist(db: Session, request: dict) -> dict:
     else:
         artist_id = db.execute(text("""
             insert into public.artists
-              (slug,name,name_ko,description,image_url,hero_image_url,facebook_url,x_url,instagram_url,active)
-            values (:slug,:name,:name_ko,:description,:image_url,:hero_image_url,:facebook_url,:x_url,:instagram_url,:active)
+              (slug,name,name_ko,real_name,role_description,debut_text,agency,fandom_name,description,image_url,hero_image_url,facebook_url,x_url,instagram_url,active)
+            values (:slug,:name,:name_ko,:real_name,:role_description,:debut_text,:agency,:fandom_name,:description,:image_url,:hero_image_url,:facebook_url,:x_url,:instagram_url,:active)
             returning id
         """), values).scalar_one()
     save_artist_sections(db, artist_id, writing)
-    if values['debut_text']:
-        db.execute(text('update public.artists set debut_text=coalesce(debut_text,:debut) where id=:id'),
-                   {'debut': values['debut_text'], 'id': artist_id})
-
     gallery_count = save_gallery_candidates(db, artist_id, gallery_review) if 'gallery' in scopes else 0
 
-    album_count = track_count = 0
-    if scopes & {"albums", "tracks"}:
-        for index, album in enumerate(albums, 1):
-            album_row = db.execute(text("select id from public.artist_albums where artist_id=:artist_id and title=:title"), {"artist_id": artist_id, "title": album["title"]}).first()
-            if album_row:
-                album_id = album_row.id
-                db.execute(text("""update public.artist_albums set cover_url=coalesce(cover_url,:cover),
-                    external_url=coalesce(external_url,:source), release_date=coalesce(release_date,cast(:released as date)),
-                    track_count=greatest(coalesce(track_count,0),:count) where id=:id"""),
-                    {"id": album_id, "cover": album.get("cover_url"), "source": album["external_url"],
-                     "released": album.get("release_date"), "count": len(album["tracks"])})
-            else:
-                album_id = db.execute(text("""
-                    insert into public.artist_albums
-                      (artist_id,title,release_date,track_count,cover_url,external_url,album_type,active,display_order)
-                    values (:artist_id,:title,cast(:release_date as date),:track_count,:cover_url,:external_url,:album_type,:active,:display_order)
-                    returning id
-                """), {"artist_id": artist_id, "title": album["title"], "release_date": album["release_date"], "track_count": len(album["tracks"]), "cover_url": album["cover_url"], "external_url": album["external_url"], "album_type": album.get("album_type") or "미확인", "active": active, "display_order": index}).scalar_one()
-                album_count += 1
-            if "tracks" in scopes:
-                for track_index, track in enumerate(album["tracks"], 1):
-                    inserted = db.execute(text("""
-                        insert into public.artist_album_tracks
-                          (album_id,track_number,title,duration_text,youtube_url,active,display_order)
-                        values (:album_id,:track_number,:title,:duration_text,:youtube_url,:active,:display_order)
-                        on conflict (album_id,track_number) do update
-                          set youtube_url=coalesce(artist_album_tracks.youtube_url,excluded.youtube_url)
-                          where artist_album_tracks.title=excluded.title returning id
-                    """), {"album_id": album_id, "track_number": track_index, "title": track["title"], "duration_text": track["duration"], "youtube_url": track["url"] if youtube_id(track.get("url") or "") else None, "active": active, "display_order": track_index}).first()
-                    track_count += int(inserted is not None)
+    album_count, track_count = _save_artist_albums(db, artist_id, albums, scopes, active)
     db.commit()
     logs.append("검토 데이터 저장 완료")
     return {"artist_id": artist_id, "slug": slug, "sources": len(pages), "gallery": gallery_count, "albums": len(albums), "tracks": track_total,

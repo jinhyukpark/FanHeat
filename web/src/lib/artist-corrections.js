@@ -9,7 +9,7 @@ export function validateCorrectionImages(files) {
   if (files.length > 5) throw new Error('이미지는 최대 5장까지 첨부할 수 있습니다.')
   for (const file of files) {
     if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('JPG, PNG, WebP 이미지만 첨부할 수 있습니다.')
-    if (file.size > 5 * 1024 * 1024) throw new Error('이미지는 장당 5MB 이하로 첨부해 주세요.')
+    if (file.size > 10 * 1024 * 1024) throw new Error('이미지는 장당 10MB 이하로 첨부해 주세요.')
   }
 }
 

@@ -88,6 +88,9 @@ def get_automation_config(source: Source, db: Session = Depends(get_db)) -> dict
     settings = get_settings()
     configured = {
         Source.YOUTUBE: bool(settings.youtube_api_key),
+        Source.TIKTOK: bool(
+            settings.naver_client_id and settings.naver_client_secret
+        ),
         Source.X: bool(settings.x_bearer_token),
         Source.NEWS: bool(
             (settings.naver_client_id and settings.naver_client_secret)
@@ -117,7 +120,10 @@ def create_collection(request: CollectionRequest, db: Session = Depends(get_db))
     db.add(job)
     db.commit()
     db.refresh(job)
-    collect_media.delay(request.model_dump(mode="json"), job.id)
+    collect_media.apply_async(
+        args=[request.model_dump(mode="json"), job.id],
+        task_id=str(job.id),
+    )
     return CollectionResult(job_id=job.id, source=request.source, status="pending")
 
 

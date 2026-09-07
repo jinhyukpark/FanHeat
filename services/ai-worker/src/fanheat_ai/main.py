@@ -8,6 +8,7 @@ from .config import get_settings
 from .llm import OllamaClient
 from .publication import DraftStateError, PublicationService
 from .schemas import (
+    DailyAiVoteResult,
     EngagementRunRequest,
     EngagementRunResult,
     PipelineRequest,
@@ -105,7 +106,7 @@ def run_pipeline(request: PipelineRequest) -> PipelineResult:
 def list_drafts(status: str = "review", limit: int = 50, source: str | None = None) -> list[dict]:
     if status not in {"all", "generated", "review", "approved", "scheduled", "published", "rejected", "failed"}:
         raise HTTPException(status_code=400, detail="invalid draft status")
-    if source is not None and source not in {"youtube", "news", "x"}:
+    if source is not None and source not in {"youtube", "tiktok", "news", "x"}:
         raise HTTPException(status_code=400, detail="invalid source")
     return app.state.publication.list_drafts(status, min(max(limit, 1), 1000), source)
 
@@ -146,6 +147,13 @@ def run_engagement(request: EngagementRunRequest) -> EngagementRunResult:
                 deferred_reason="manual AI draft generation has priority",
             )
         return app.state.publication.run_engagement(request.limit)
+
+
+@app.post("/v1/engagement/daily-votes", response_model=DailyAiVoteResult, dependencies=[Depends(require_internal_api_key)])
+def run_daily_ai_votes() -> DailyAiVoteResult:
+    if not settings.internal_api_key:
+        raise HTTPException(status_code=503, detail="internal authentication not configured")
+    return DailyAiVoteResult(**app.state.publication.cast_daily_ai_votes())
 
 
 @app.post("/v1/drafts/{draft_id}/approve", dependencies=[Depends(require_internal_api_key)])

@@ -52,9 +52,9 @@ export async function loadHomeData() {
   const client = requireSupabase()
   const [tracksResult, awardsResult, postsResult, artistsResult, heroResult] = await Promise.all([
     client.from('tracks').select('id,artist_id,title,subtitle,cover_url,audio_url,display_order').eq('active', true).order('display_order'),
-    client.from('award_entries').select('id,name,image_url,score,period,display_order,artist:artists(id,slug,name,name_ko,image_url,description,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,artist_albums(id,active,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,display_order,artist_album_tracks(id,active,track_number,title,duration_text,lyrics_excerpt,youtube_url,display_order)),artist_gallery_items(id,active,review_status,title,image_url,original_image_url,captured_on,display_order,source_page_url,source_provider,creator_name,license_name,license_url,attribution_text),artist_fans(id,display_name,handle,avatar_url,heat_percent,featured_rank,display_order))').eq('active', true).order('display_order'),
+    client.from('award_entries').select('id,name,image_url,score,period,display_order,artist:artists(id,slug,name,name_ko,image_url,description,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,artist_profile_images(image_url,display_order),artist_albums(id,active,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,display_order,artist_album_tracks(id,active,track_number,title,duration_text,lyrics_excerpt,youtube_url,display_order)),artist_gallery_items(id,active,review_status,title,image_url,original_image_url,captured_on,display_order,source_page_url,source_provider,creator_name,license_name,license_url,attribution_text),artist_fans(id,profile_id,display_name,handle,avatar_url,heat_percent,featured_rank,display_order))').eq('active', true).order('display_order'),
     client.from('posts').select('id,author_id,title,summary,body_html,tags,reference_url,source_label,source_url,source_links,inline_image_sources,audio_url,audio_title,audio_artist,view_count,vote_count,author_display_name,published_at,created_at,post_images(image_url,sort_order,source_label,source_url),comments(count)').eq('status', 'published').order('published_at', { ascending: false }).order('created_at', { ascending: false }),
-    client.from('artists').select('id,slug,name,name_ko,image_url,description,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,artist_albums(id,active,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,display_order,artist_album_tracks(id,active,track_number,title,duration_text,lyrics_excerpt,youtube_url,display_order)),artist_gallery_items(id,active,review_status,title,image_url,original_image_url,captured_on,display_order,source_page_url,source_provider,creator_name,license_name,license_url,attribution_text),artist_fans(id,display_name,handle,avatar_url,heat_percent,featured_rank,display_order)').eq('active', true).order('id'),
+    client.from('artists').select('id,slug,name,name_ko,image_url,description,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,artist_profile_images(image_url,display_order),artist_albums(id,active,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,display_order,artist_album_tracks(id,active,track_number,title,duration_text,lyrics_excerpt,youtube_url,display_order)),artist_gallery_items(id,active,review_status,title,image_url,original_image_url,captured_on,display_order,source_page_url,source_provider,creator_name,license_name,license_url,attribution_text),artist_fans(id,profile_id,display_name,handle,avatar_url,heat_percent,featured_rank,display_order)').eq('active', true).order('id'),
     client.from('home_hero_slides').select('id,layout_type,background_url,foreground_url,title,subtitle,display_order').eq('active', true).order('display_order').order('id'),
   ])
   const error = tracksResult.error || awardsResult.error || postsResult.error || artistsResult.error
@@ -78,7 +78,7 @@ export async function loadHomeData() {
       const postImages = [...(row.post_images || [])].sort((a, b) => a.sort_order - b.sort_order)
       const images = postImages.map(item => imageName(item.image_url))
       const imageSources = postImages.map(item => ({ label: item.source_label || '', url: item.source_url || '' }))
-      return [row.title, images[0] || 'post_list1.jpg', { ...row, post_images: postImages, images, image_sources: imageSources, author_avatar_url: postAuthors[row.author_id]?.avatar_url || null, comment_count: row.comments?.[0]?.count || 0 }]
+      return [row.title, images[0] || '', { ...row, post_images: postImages, images, image_sources: imageSources, author_avatar_url: postAuthors[row.author_id]?.avatar_url || null, comment_count: row.comments?.[0]?.count || 0 }]
     }),
   }
 }
@@ -93,10 +93,88 @@ const artistVisitorKey = () => {
   return value
 }
 
+const postViewerKey = () => {
+  const storageKey = 'fanheat-post-viewer-key'
+  let value = window.localStorage.getItem(storageKey)
+  if (!value) {
+    value = crypto.randomUUID()
+    window.localStorage.setItem(storageKey, value)
+  }
+  return value
+}
+
 export async function recordArtistClick(artistId) {
   if (!artistId) return
   const { error } = await requireSupabase().rpc('record_artist_click', { p_artist_id: artistId, p_visitor_key: artistVisitorKey() })
   if (error) throw error
+}
+
+export async function recordPostView(postId) {
+  if (!postId) return null
+  const { data, error } = await requireSupabase().rpc('record_post_view', {
+    p_post_id: postId,
+    p_viewer_key: postViewerKey(),
+  })
+  if (error) throw error
+  return Number(data)
+}
+
+export async function submitCopyrightReport(userId, values) {
+  if (!userId) throw new Error('로그인이 필요합니다.')
+  const payload = {
+    reporter_id: userId,
+    reporter_email: String(values.email || '').trim(),
+    contact: String(values.contact || '').trim(),
+    report_type: values.reportType,
+    severity: values.severity,
+    content: String(values.content || '').trim(),
+  }
+  const { data, error } = await requireSupabase().from('copyright_reports').insert(payload).select('id').single()
+  if (error) throw error
+  return data
+}
+
+export async function loadArtistEngagement(userId, artistId) {
+  if (!userId || !artistId) return { following: false, fan: null }
+  const client = requireSupabase()
+  const [followResult, fanResult] = await Promise.all([
+    client.from('artist_followers').select('artist_id').eq('artist_id', artistId).eq('user_id', userId).maybeSingle(),
+    client.from('artist_fans').select('id,display_name,handle,avatar_url,heat_percent,featured_rank,display_order,profile_id').eq('artist_id', artistId).eq('profile_id', userId).maybeSingle(),
+  ])
+  if (followResult.error || fanResult.error) throw followResult.error || fanResult.error
+  return { following: Boolean(followResult.data), fan: fanResult.data }
+}
+
+export async function setArtistFollowing(userId, artistId, following) {
+  const client = requireSupabase()
+  const request = following
+    ? client.from('artist_followers').upsert({ user_id: userId, artist_id: artistId }, { onConflict: 'artist_id,user_id', ignoreDuplicates: true })
+    : client.from('artist_followers').delete().eq('artist_id', artistId).eq('user_id', userId)
+  const { error } = await request
+  if (error) throw error
+  return following
+}
+
+export async function setArtistFanRegistration(userId, artistId, registered) {
+  const client = requireSupabase()
+  if (!registered) {
+    const { error } = await client.from('artist_fans').delete().eq('artist_id', artistId).eq('profile_id', userId)
+    if (error) throw error
+    return null
+  }
+  const { data: profile, error: profileError } = await client.from('profiles').select('display_name,avatar_url').eq('id', userId).single()
+  if (profileError) throw profileError
+  const displayName = String(profile.display_name || 'FAN').trim()
+  const { data, error } = await client.from('artist_fans').upsert({
+    artist_id: artistId,
+    profile_id: userId,
+    display_name: displayName,
+    handle: `@${displayName.replace(/^@/, '').replace(/\s+/g, '_')}`,
+    avatar_url: profile.avatar_url || null,
+    active: true,
+  }, { onConflict: 'artist_id,profile_id' }).select('id,display_name,handle,avatar_url,heat_percent,featured_rank,display_order,profile_id').single()
+  if (error) throw error
+  return data
 }
 
 const seoulDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())

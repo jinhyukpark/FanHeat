@@ -1,0 +1,65 @@
+{
+  "id": "FhAiDailyVotes01",
+  "name": "FANHEAT AI daily artist votes",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "10 * * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-ai-daily-votes",
+      "name": "Check Daily Votes Hourly",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://ai-worker:8090/v1/engagement/daily-votes",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-FANHEAT-API-KEY",
+              "value": "={{ $env.FANHEAT_INTERNAL_API_KEY }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "cast-ai-daily-votes",
+      "name": "Cast Missing Daily AI Votes",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [260, 0]
+    }
+  ],
+  "connections": {
+    "Check Daily Votes Hourly": {
+      "main": [
+        [
+          {
+            "node": "Cast Missing Daily AI Votes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Asia/Seoul"
+  },
+  "active": true,
+  "versionId": "dd58f489-3aa9-47ee-90c2-433e4c81dfea"
+}

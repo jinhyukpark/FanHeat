@@ -12,6 +12,9 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./media_collector.db"
     redis_url: str = "redis://localhost:6379/0"
     youtube_api_key: str | None = None
+    tiktok_research_access_token: str | None = None
+    tiktok_client_key: str | None = None
+    tiktok_client_secret: str | None = None
     x_bearer_token: str | None = None
     news_api_key: str | None = None
     news_rss_feeds: str = ""

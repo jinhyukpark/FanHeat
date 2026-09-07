@@ -8,13 +8,14 @@ import Youtube from '@tiptap/extension-youtube'
 import DOMPurify from 'dompurify'
 import { supabase } from './lib/supabase'
 import { loadPublicProfileFriends } from './lib/api'
-import { addComment, cancelFriendRequest, castDailyArtistVote, deleteComment, deleteProfileGalleryImage, loadBestFriends, loadCommentReactions, loadComments, loadDailyArtistVotes, loadFanStats, loadFriendshipStatus, loadHomeData, loadMessageBlocks, loadMessageContacts, loadPostBookmark, loadPostVote, loadPrivateMessages, loadProfileCustomization, loadProfileGallery, loadUnreadMessageCount, loadUserBookmarks, loadUserComments, markPrivateMessageRead, publishPost, recordArtistClick, saveProfileCustomization, sendFriendRequest, sendPrivateMessage, setCommentReaction, setMessageBlock, setPostBookmark, setPostVote, submitFanPhotos, updateComment, updatePost, uploadProfileGalleryImages } from './lib/api'
+import { addComment, cancelFriendRequest, castDailyArtistVote, deleteComment, deleteProfileGalleryImage, loadArtistEngagement, loadBestFriends, loadCommentReactions, loadComments, loadDailyArtistVotes, loadFanStats, loadFriendshipStatus, loadHomeData, loadMessageBlocks, loadMessageContacts, loadPostBookmark, loadPostVote, loadPrivateMessages, loadProfileCustomization, loadProfileGallery, loadUnreadMessageCount, loadUserBookmarks, loadUserComments, markPrivateMessageRead, publishPost, recordArtistClick, recordPostView, saveProfileCustomization, sendFriendRequest, sendPrivateMessage, setArtistFanRegistration, setArtistFollowing, setCommentReaction, setMessageBlock, setPostBookmark, setPostVote, submitFanPhotos, updateComment, updatePost, uploadProfileGalleryImages } from './lib/api'
 import { calculateFanLevel, calculateFanRank } from './lib/fan-stats'
 import { MAX_FEATURED_MEDIA_COUNT } from './lib/post-limits'
 import { PROFILE_DISPLAY_DEFAULTS, withProfileDisplayDefaults } from './lib/profile-defaults'
 import { I18nProvider, useI18n } from './i18n'
 import AdminApp from './AdminApp'
 import LegalPage from './LegalPage'
+import CopyrightReportDialog from './CopyrightReportDialog'
 import './hero-carousel.css'
 import './list-number.css'
 import './star-page.css'
@@ -26,7 +27,11 @@ const A = 'https://yuiemljibxeoifupvluc.supabase.co/storage/v1/object/public/fan
 const USER_MUSIC_PLAYBACK_ENABLED = false
 // 글쓰기 음원 첨부 UI는 서비스 방향 확정 전까지 숨긴다. 다시 제공할 때 true로 변경한다.
 const POST_MUSIC_ATTACHMENT_ENABLED = false
-const assetSrc = value => /^https?:\/\//.test(value || '') || String(value || '').startsWith('/') ? value : `${A}${value}`
+const assetSrc = value => {
+  const source = String(value || '').trim()
+  if (!source) return ''
+  return /^https?:\/\//.test(source) || source.startsWith('/') ? source : `${A}${source}`
+}
 
 function useSwipeCarousel({ length, index, onChange, threshold = 32 }) {
   const gesture = useRef(null)
@@ -161,39 +166,6 @@ const richHtmlWithImageCredits = (value, imageSources = []) => {
   return template.innerHTML
 }
 const highResolutionFallbacks = ['rescene-jacket.jpeg', 'ive-jacket.jpeg', 'bingle_bangle.jpg', 'mypage.jpg', 'rescene-bg.jpeg', 'ive-bg.jpeg', 'post2.jpg', 'mypage_bg.jpg']
-const postDetailFallbacks = [
-  ['rescene-jacket.jpeg', 'rescene-bg.jpeg', 'mypage.jpg'],
-  ['post2.jpg', 'rescene-jacket.jpeg', 'ive-jacket.jpeg'],
-  ['ive-jacket.jpeg', 'ive-bg.jpeg', 'bingle_bangle.jpg'],
-  ['mypage.jpg', 'mypage_bg.jpg', 'post2.jpg'],
-]
-
-const charts = [
-  ['Way Back Home', '숀 (SHAUN)', 'chart1.jpg'],
-  ['SQUARE UP', 'BLACKPINK', 'chart2.jpg'],
-  ['Summer Nights', 'TWICE(트와이스)', 'chart3.jpg'],
-  ['RED MOON', '마마무(Mamamoo)', 'chart4.jpg'],
-  ['ONE & SIX', 'Apink (에이핑크)', 'chart5.jpg'],
-  ['Blooming Blue', '청하', 'chart6.jpg'],
-  ['여행', '볼빨간사춘기', 'chart7_2.jpg'],
-  ['Forever Young', 'BLACKPINK', 'chart8.jpg'],
-  ['키스 먼저 할까요', '폴킴', 'chart9.jpg'],
-  ['The Fairy Tale', '멜로망스', 'chart10.jpg'],
-  ['THIS IS US', '비투비', 'chart11.jpg'],
-  ['지나오다', '닐로', 'chart12.jpg'],
-]
-
-const awards = [
-  ['워너원', '158,254', 'award1.jpg'],
-  ['아이유', '121,001', 'award2.jpg'],
-  ['빅뱅', '91,447', 'award3.jpg'],
-  ['씨스타', '62,221', 'award4.jpg'],
-  ['트와이스', '58,912', 'award1.jpg'],
-  ['레드벨벳', '52,430', 'award2.jpg'],
-  ['엑소', '49,118', 'award3.jpg'],
-  ['블랙핑크', '45,702', 'award4.jpg'],
-]
-
 const starCopy = {
   '아이유': { realName: '아이유 (이지은)', role: '싱어송라이터 · 배우', debut: '2008년 9월 18일', agency: 'EDAM 엔터테인먼트', fandom: 'UAENA', bio: ['아이유는 섬세한 감성과 폭넓은 음악적 스펙트럼으로 사랑받는 대한민국의 싱어송라이터이자 배우입니다. 직접 작사와 작곡에 참여하며 세대와 장르를 아우르는 독자적인 음악 세계를 만들어 왔습니다.', '음악 활동과 연기 활동을 함께 이어가며 무대, 드라마, 영화 등 다양한 영역에서 자신만의 이야기를 전하고 있습니다. 팬들과 꾸준히 소통하고 공연을 통해 완성도 높은 라이브 무대를 선보입니다.'] },
   '워너원': { realName: '워너원 (Wanna One)', role: '보이 그룹', debut: '2017년 8월 7일', agency: 'Swing 엔터테인먼트', fandom: 'WANNABLE' },
@@ -240,10 +212,12 @@ const makeStarProfile = ([name, score, image, data]) => {
   const gallery = galleryItems.map(item => item.image_url).filter(Boolean)
   const displayImage = data?.hero_image_url || image
   const displayCredit = galleryItems.find(item => item.image_url === displayImage || item.original_image_url === displayImage)
+  const profileImages = [...(data?.artist_profile_images || [])].sort((a, b) => Number(a.display_order || 0) - Number(b.display_order || 0)).map(item => item.image_url).filter(Boolean)
   return {
     id: data?.id || name,
     name,
     image,
+    profileImages: profileImages.length ? profileImages : [image].filter(Boolean),
     realName: data?.real_name || name,
     role: data?.role_description || '정보 미등록',
     debut: data?.debut_text || '정보 미등록',
@@ -256,7 +230,7 @@ const makeStarProfile = ([name, score, image, data]) => {
     gallery,
     galleryItems,
     albums: [...(data?.artist_albums || [])].sort((a, b) => Number(a.display_order || 0) - Number(b.display_order || 0)),
-    fans: [...(data?.artist_fans || [])].sort((a, b) => Number(a.display_order || 0) - Number(b.display_order || 0)),
+    fans: dedupeArtistFans(data?.artist_fans || []),
     history: Array.isArray(data?.history_items) ? data.history_items : [],
     awards: Array.isArray(data?.award_items) ? data.award_items : [],
     followers: Number(data?.follower_count || 0) || Number(String(score).replace(/,/g, '')) || 0,
@@ -269,18 +243,22 @@ const makeStarProfile = ([name, score, image, data]) => {
   }
 }
 
-const posts = [
-  ['설리 비키니 + 딸기', 'post_list1.jpg'],
-  ['트와이스 사나', 'post_list2.jpg'],
-  ['레드벨벳 슬기 웬디 - 배틀트립', 'post_list3.jpg'],
-  ['프로듀스48 연습생 - 김도아', 'post_list4.jpg'],
-  ['7월 27일 치바 에리이 트위터 사진', 'post_list5.jpg'],
-  ['하니의 에나멜 의상 뒷태', 'post_list6.jpg'],
-  ['모모랜드 데이지', 'post_list7.jpg'],
-  ['설리 비키니 + 딸기', 'post_list1.jpg'],
-  ['트와이스 사나', 'post_list2.jpg'],
-  ['레드벨벳 슬기 웬디 - 배틀트립', 'post_list3.jpg'],
-]
+const dedupeArtistFans = fans => {
+  const unique = []
+  const profileIds = new Set()
+  const handles = new Set()
+  ;[...fans]
+    .sort((a, b) => Number(Boolean(b.profile_id)) - Number(Boolean(a.profile_id)) || Number(a.display_order || 0) - Number(b.display_order || 0))
+    .forEach(fan => {
+      const profileId = fan?.profile_id || ''
+      const handle = String(fan?.handle || '').trim().toLowerCase()
+      if (profileId ? profileIds.has(profileId) : (handle && handles.has(handle))) return
+      if (profileId) profileIds.add(profileId)
+      if (handle) handles.add(handle)
+      unique.push(fan)
+    })
+  return unique.sort((a, b) => Number(a.display_order || 0) - Number(b.display_order || 0))
+}
 
 const keywordStopWords = new Set(['그리고', '그러나', '대한', '관련', '사진', '영상', '오늘', '이번', '공개', '최신', '소식', '포스트', '팬히트', 'fanheat', 'the', 'and', 'with', 'from'])
 const trendingPostKeywords = (items = [], limit = 5) => {
@@ -320,12 +298,6 @@ const trendingPostKeywords = (items = [], limit = 5) => {
     .map(item => item.label)
 }
 
-const postSlides = posts.map(([title, image], index) => [
-  image,
-  posts[(index + 1) % posts.length][1],
-  posts[(index + 2) % posts.length][1],
-])
-
 const serviceNotices = [
   {
     id: 'welcome-2026-08',
@@ -353,8 +325,6 @@ const serviceNotices = [
   },
 ]
 
-const voteCounts = [28, 76, 184, 430, 1280, 356, 92, 2640, 5820, 12840]
-
 function dailyVoteTimeRemaining(now = Date.now()) {
   const koreaOffset = 9 * 60 * 60 * 1000
   const koreaNow = new Date(now + koreaOffset)
@@ -366,7 +336,7 @@ function dailyVoteTimeRemaining(now = Date.now()) {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
 }
 
-function ChartPanel({ onPlay, activeSong, songPlaying = false, items = charts, artists = [], collapsed, onToggle, user, onLogin, initialVoteMode = false, dedicatedVotePage = false }) {
+function ChartPanel({ onPlay, activeSong, songPlaying = false, items = [], artists = [], collapsed, onToggle, user, onLogin, initialVoteMode = false, dedicatedVotePage = false }) {
   const { t, localizeTitle } = useI18n()
   const [voteMode, setVoteMode] = useState(initialVoteMode)
   const [voteQuery, setVoteQuery] = useState('')
@@ -399,11 +369,22 @@ function ChartPanel({ onPlay, activeSong, songPlaying = false, items = charts, a
     if (!user) { onLogin(); return }
     setVoteMode(value => !value); setSelectedVote(null); setVoteQuery(''); setVoteMessage('')
   }
-  const showVoteRanking = voteMode || dedicatedVotePage
+  // The right panel is the daily artist ranking in every state. Voting mode
+  // only adds selection controls; it must not swap an unrelated track list in.
+  const showVoteRanking = true
+  const showVoteScore = voteMode || dedicatedVotePage
   const ownVoteItem = ownVote ? items.find(([, , , data = {}]) => data.artist_id === ownVote.artist_id) : null
   const ownVoteArtist = ownVote ? artists.find(artist => artist.id === ownVote.artist_id) : null
   const ownVoteLabel = ownVoteArtist?.name_ko || ownVoteArtist?.name || ownVoteItem?.[1] || ownVoteItem?.[0] || '선택한 아티스트'
-  const filteredVoteItems = voteQuery.trim() ? artists.filter(artist => `${artist.name} ${artist.name_ko || ''}`.toLowerCase().includes(voteQuery.trim().toLowerCase())).map(artist => [artist.name_ko || artist.name, artist.name, artist.image_url, { artist_id: artist.id }]) : items
+  const artistVoteItems = artists.slice(0, 50).map((artist, index) => [
+    artist.name_ko || artist.name,
+    artist.name,
+    artist.image_url,
+    { artist_id: artist.id, display_order: index + 1 },
+  ])
+  const filteredVoteItems = showVoteRanking
+    ? artistVoteItems.filter(([title, artist]) => !voteQuery.trim() || `${title} ${artist}`.toLowerCase().includes(voteQuery.trim().toLowerCase()))
+    : items
   const voteScore = ([, , , data = {}]) => Number(dailyCounts[data.artist_id] ?? data.vote_count ?? 0)
   const voteEntries = filteredVoteItems
     .map((item, registrationIndex) => {
@@ -439,7 +420,7 @@ function ChartPanel({ onPlay, activeSong, songPlaying = false, items = charts, a
       {dedicatedVotePage && !voteMode && <p className={`daily-vote-state ${ownVote ? 'complete' : ''}`}>{ownVote ? `오늘의 선택 · ${localizeTitle(ownVoteLabel)}` : '오늘 아직 투표하지 않았어요'}</p>}
       {!voteMode && <button className={`vote-button ${ownVote ? 'complete' : ''}`} onClick={openVoting}>{ownVote ? '1Day 투표 완료' : t('voteDay')}</button>}
     </div>
-    <ol className={`chart-list ${showVoteRanking ? 'voting vote-ranking' : ''} ${dedicatedVotePage && !voteMode ? 'vote-readonly' : ''}`}>
+    <ol className={`chart-list ${showVoteRanking ? 'voting vote-ranking' : ''} ${showVoteScore ? 'score-visible' : ''} ${dedicatedVotePage && !voteMode ? 'vote-readonly' : ''}`}>
       {voteEntries.map(({ item: [title, artist, image, data = {}], score, rankNumber }, index) => {
         const crownCount = dedicatedVotePage && rankNumber && rankNumber <= 3 ? 4 - rankNumber : 0
         const selected = voteMode ? (selectedVote?.data.artist_id || ownVote?.artist_id) === data.artist_id : false
@@ -451,7 +432,7 @@ function ChartPanel({ onPlay, activeSong, songPlaying = false, items = charts, a
           </span>
           <span className="cover"><img src={assetSrc(image)} alt={`${title} 커버`} /><b className={`compact-rank rank-${index + 1}`}>{index + 1}위</b>{USER_MUSIC_PLAYBACK_ENABLED && <i>{activeSong === index && songPlaying ? 'Ⅱ' : '▶'}</i>}</span>
           <span className="song"><strong>{localizeTitle(title)}</strong><small>{artist}</small></span>
-          {showVoteRanking && <span className="vote-score"><small>SCORE</small><strong>{score.toLocaleString()}</strong></span>}
+          {showVoteScore && <span className="vote-score"><small>SCORE</small><strong>{score.toLocaleString()}</strong></span>}
           {voteMode && <span className={`vote-check ${selected ? 'selected' : ''}`}>✓</span>}
         </button>
       </li>})}
@@ -468,14 +449,8 @@ function MobileVotePage({ onClose, ...chartProps }) {
   </section>
 }
 
-const defaultHeroSlides = [
-  { id: 'default-aoa', layout_type: 'layered', foreground_url: 'bingle_bangle.jpg', background_url: 'bg_hyuna.jpg', title: 'AOA · Bingle Bangle', subtitle: 'AOA 5TH MINI ALBUM · BINGLE BANGLE' },
-  { id: 'default-rescene', layout_type: 'layered', foreground_url: 'rescene-jacket.jpeg', background_url: 'rescene-bg.jpeg', title: 'RESCENE · Pretty Girl', subtitle: '2026 SPECIAL SINGLE · PRETTY GIRL' },
-  { id: 'default-ive', layout_type: 'layered', foreground_url: 'ive-jacket.jpeg', background_url: 'ive-bg.jpeg', title: 'IVE · REVIVE+', subtitle: 'IVE THE 2ND ALBUM · BLACKHOLE' },
-]
-
 function Hero({ user, onLogin, slides: configuredSlides = [] }) {
-  const slides = configuredSlides.length ? configuredSlides : defaultHeroSlides
+  const slides = configuredSlides
   const [active, setActive] = useState(0)
   const [paused, setPaused] = useState(false)
   const [photoOpen, setPhotoOpen] = useState(false)
@@ -486,7 +461,7 @@ function Hero({ user, onLogin, slides: configuredSlides = [] }) {
   const [photoSubmitting, setPhotoSubmitting] = useState(false)
   useEffect(() => { if (active >= slides.length) setActive(0) }, [active, slides.length])
   useEffect(() => {
-    if (paused) return undefined
+    if (paused || slides.length < 2) return undefined
     const timer = setInterval(() => setActive(current => (current + 1) % slides.length), 5000)
     return () => clearInterval(timer)
   }, [paused, slides.length])
@@ -629,6 +604,7 @@ function SharedHeader({ query, setQuery, trendingKeywords = [], menuOpen, setMen
   }
   const unreadNoticeCount = serviceNotices.filter(notice => !readNoticeIds.includes(notice.id)).length
   const openNotices = () => { setProfileOpen(false); setMenuOpen(false); setSelectedNotice(null); setNoticeOpen(true) }
+  const openCopyrightReport = () => { setProfileOpen(false); setMenuOpen(false); window.dispatchEvent(new CustomEvent('fanheat:open-copyright-report')) }
   const openNoticeDetail = notice => {
     setSelectedNotice(notice)
     if (readNoticeIds.includes(notice.id)) return
@@ -662,7 +638,7 @@ function SharedHeader({ query, setQuery, trendingKeywords = [], menuOpen, setMen
             <header><img src={assetSrc(user?.user_metadata?.avatar_url || 'mypage.jpg')} alt="" /><strong>{displayName}</strong></header>
             <section><h3>내 계정</h3><button role="menuitem" onClick={() => { setProfileOpen(false); onMyPage('posts') }}>마이 페이지</button><button role="menuitem" onClick={() => { setProfileOpen(false); onMyPage('followers') }}>내 친구</button><button role="menuitem" onClick={() => { setProfileOpen(false); onMyPage('messages') }}>쪽지 <b>{unreadMessageCount > 0 ? `${unreadMessageCount} NEW` : '›'}</b></button></section>
             <section><h3>콘텐츠</h3><button role="menuitem" onClick={() => { setProfileOpen(false); onWrite() }}>글 작성</button><button role="menuitem" onClick={() => { setProfileOpen(false); onMyPage('bookmarks') }}>북마크</button><button role="menuitem" onClick={() => { setProfileOpen(false); onMyPage('posts') }}>포스트</button></section>
-            <section><h3>안내</h3><button role="menuitem" onClick={openNotices}>공지사항 {unreadNoticeCount > 0 ? <b className="notice-menu-badge">{unreadNoticeCount} NEW</b> : <b aria-hidden="true">›</b>}</button><button role="menuitem" onClick={() => openInfoPage('/legal/terms')}>서비스 이용약관 <b aria-hidden="true">↗</b></button><button role="menuitem" onClick={() => openInfoPage('/legal/privacy')}>개인정보 처리방침 <b aria-hidden="true">↗</b></button><button role="menuitem" onClick={() => openInfoPage('/support')}>고객지원 <b aria-hidden="true">↗</b></button></section>
+            <section><h3>안내</h3><button role="menuitem" onClick={openNotices}>공지사항 {unreadNoticeCount > 0 ? <b className="notice-menu-badge">{unreadNoticeCount} NEW</b> : <b aria-hidden="true">›</b>}</button><button role="menuitem" onClick={openCopyrightReport}>저작권 신고 <b aria-hidden="true">›</b></button><button role="menuitem" onClick={() => openInfoPage('/legal/terms')}>서비스 이용약관 <b aria-hidden="true">↗</b></button><button role="menuitem" onClick={() => openInfoPage('/legal/privacy')}>개인정보 처리방침 <b aria-hidden="true">↗</b></button><button role="menuitem" onClick={() => openInfoPage('/support')}>고객지원 <b aria-hidden="true">↗</b></button></section>
             <button className="quick-logout" role="menuitem" onClick={() => { setProfileOpen(false); onLogout() }}>로그아웃</button>
           </div>}
         </div>
@@ -671,6 +647,7 @@ function SharedHeader({ query, setQuery, trendingKeywords = [], menuOpen, setMen
     {menuOpen && <div className="mobile-menu-overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && setMenuOpen(false)}><aside className="mobile-menu-drawer" role="dialog" aria-modal="true" aria-labelledby="mobile-menu-title"><header><div><small>FAN HEAT</small><h2 id="mobile-menu-title">메뉴</h2></div><button type="button" onClick={() => setMenuOpen(false)} aria-label="메뉴 닫기">×</button></header><nav aria-label="모바일 전체 메뉴"><section><h3>콘텐츠 탐색</h3><button type="button" className={searchFilters?.sort === 'popular' ? 'active' : ''} onClick={() => openMobileFeed('popular')}><span aria-hidden="true">↗</span><b>인기</b><small>HEAT가 높은 포스트</small></button><button type="button" className={searchFilters?.sort === 'latest' ? 'active' : ''} onClick={() => openMobileFeed('latest')}><span aria-hidden="true">◷</span><b>최신</b><small>최근 등록된 포스트</small></button></section><section><h3>팬 참여</h3><button type="button" onClick={openFanPhotoShare}><span aria-hidden="true">▧</span><b>팬 사진 공유</b><small>직접 촬영한 사진 보내기</small></button></section><section className="mobile-menu-language"><h3>언어</h3><div>{[['ko','한국어'],['ja','日本語'],['en','English']].map(([value, label]) => <button type="button" className={locale === value ? 'active' : ''} onClick={() => { setLocale(value); setMenuOpen(false) }} aria-pressed={locale === value} key={value}>{label}</button>)}</div></section><section><h3>서비스 안내</h3><button type="button" onClick={openNotices}><b>공지사항</b>{unreadNoticeCount > 0 ? <em className="mobile-notice-badge">{unreadNoticeCount} NEW</em> : <span aria-hidden="true">›</span>}</button><button type="button" onClick={() => openInfoPage('/legal/terms')}><b>서비스 이용약관</b><span aria-hidden="true">›</span></button><button type="button" onClick={() => openInfoPage('/legal/privacy')}><b>개인정보 처리방침</b><span aria-hidden="true">›</span></button><button type="button" onClick={() => openInfoPage('/support')}><b>고객지원</b><span aria-hidden="true">›</span></button></section></nav></aside></div>}
     <button className="menu-button" onClick={() => setMenuOpen(v => !v)} aria-expanded={menuOpen} aria-label="메뉴 열기">{menuOpen ? '×' : '☰'}</button>
     {noticeLayer}
+    <CopyrightReportDialog user={user} />
   </header>
 }
 
@@ -755,6 +732,7 @@ function UnifiedAudioPlayer({ track, playing, onPlayingChange, onPrevious, onNex
 }
 
 function MyPageAudioPlayer({ track, playing, onPlayingChange, onPrevious, onNext }) {
+  if (!USER_MUSIC_PLAYBACK_ENABLED || !track) return null
   return <UnifiedAudioPlayer track={{ id: track[3], cover: track[0], title: track[1], artist: track[2], audioUrl: track[4] }} playing={playing} onPlayingChange={onPlayingChange} onPrevious={onPrevious} onNext={onNext} onOpenPlaylist={() => document.querySelector('.my-music')?.scrollIntoView({ behavior: 'smooth', block: 'center' })} className="my-page-unified-audio" label="마이 뮤직 플레이어" />
 }
 
@@ -864,14 +842,12 @@ function MyPageProfile({ user, profile, tracks = [], onBack }) {
   const profileCarouselLength = Math.max(avatarSlides.length, coverSlides.length)
   const profileSlides = Array.from({ length: profileCarouselLength }, (_, index) => avatarSlides[index % avatarSlides.length])
   const profileCoverSlides = Array.from({ length: profileCarouselLength }, (_, index) => coverSlides[index % coverSlides.length])
-  const defaultGallery = ['post_list1.jpg', 'chart7_2.jpg', 'post_list4.jpg', 'award2.jpg', 'chart1.jpg'].map((image, index) => ({ id: `sample-${index}`, signedUrl: assetSrc(image), demo: true }))
-  const music = useMemo(() => tracks.length
-    ? tracks.map(([title, artist, cover, row], index) => [cover || `music${index + 1}.jpg`, title, artist, row?.id ?? index + 1, row?.audio_url || '/sample.mp3'])
-    : [['music1.jpg','싸이렌 (Siren)','선미 / WARNING',1,'/sample.mp3'],['music2.jpg','NOAH (Feat. 박재범, Hoody)','HAON / TRAVEL : NOAH',2,'/sample.mp3'],['music3.jpg','몰랐니 (Lil’ Touch)','소녀시대-Oh!GG',3,'/sample.mp3'],['music4.jpg','IDOL','방탄소년단',4,'/sample.mp3'],['music5.jpg','Way Back Home','숀 (SHAUN)',5,'/sample.mp3']], [tracks])
+  const music = useMemo(() => tracks.map(([title, artist, cover, row], index) => [cover || '', title, artist, row?.id ?? index + 1, row?.audio_url || '']), [tracks])
   const [slide, setSlide] = useState(0)
+  const [avatarMotion, setAvatarMotion] = useState('')
   const [trackIndex, setTrackIndex] = useState(0)
   const [playing, setPlaying] = useState(false)
-  const [gallery, setGallery] = useState(() => profile ? [] : defaultGallery)
+  const [gallery, setGallery] = useState([])
   const [galleryLightboxIndex, setGalleryLightboxIndex] = useState(null)
   const [fanStats, setFanStats] = useState(null)
   const [fanStatsError, setFanStatsError] = useState('')
@@ -898,58 +874,25 @@ function MyPageProfile({ user, profile, tracks = [], onBack }) {
     panel.addEventListener('scroll', updateOverlayScroll, { passive: true })
     return () => { panel.removeEventListener('scroll', updateOverlayScroll); window.clearTimeout(hideTimer) }
   }, [])
+  const beginAvatarMotion = direction => {
+    if (profileSlides.length < 2 || avatarMotion) return
+    setAvatarMotion(direction)
+  }
+  const profileSwipe = useSwipeCarousel({ length: profileSlides.length, index: slide, onChange: (_, direction) => beginAvatarMotion(direction), threshold: 32 })
   useEffect(() => {
-    const carousel = document.querySelector('.my-page-profile .my-avatar-carousel')
-    const image = carousel?.querySelector(':scope > img')
-    if (!carousel || !image || profileSlides.length < 2) return undefined
-    let pointerId = null
-    let startX = 0
-    let startY = 0
-    let axis = null
-    let dragX = 0
-    const resetDrag = () => {
-      pointerId = null
-      axis = null
-      dragX = 0
-      carousel.classList.remove('is-dragging')
-      image.style.transform = 'translateX(0)'
-    }
-    const startDrag = event => {
-      if ((event.pointerType === 'mouse' && event.button !== 0) || event.target.closest('button,a')) return
-      pointerId = event.pointerId
-      startX = event.clientX
-      startY = event.clientY
-      carousel.classList.add('is-dragging')
-      carousel.setPointerCapture?.(event.pointerId)
-    }
-    const moveDrag = event => {
-      if (event.pointerId !== pointerId) return
-      const distanceX = event.clientX - startX
-      const distanceY = event.clientY - startY
-      if (!axis && Math.max(Math.abs(distanceX), Math.abs(distanceY)) >= 6) axis = Math.abs(distanceX) > Math.abs(distanceY) ? 'x' : 'y'
-      if (axis !== 'x') return
-      event.preventDefault()
-      dragX = Math.max(-96, Math.min(96, distanceX))
-      image.style.transform = `translateX(${dragX}px)`
-    }
-    const finishDrag = event => {
-      if (event.pointerId !== pointerId) return
-      if (axis === 'x' && Math.abs(dragX) >= 32) setSlide(current => (current + (dragX < 0 ? 1 : -1) + profileSlides.length) % profileSlides.length)
-      resetDrag()
-    }
-    carousel.addEventListener('pointerdown', startDrag)
-    carousel.addEventListener('pointermove', moveDrag)
-    carousel.addEventListener('pointerup', finishDrag)
-    carousel.addEventListener('pointercancel', resetDrag)
-    carousel.addEventListener('lostpointercapture', resetDrag)
-    return () => {
-      carousel.removeEventListener('pointerdown', startDrag)
-      carousel.removeEventListener('pointermove', moveDrag)
-      carousel.removeEventListener('pointerup', finishDrag)
-      carousel.removeEventListener('pointercancel', resetDrag)
-      carousel.removeEventListener('lostpointercapture', resetDrag)
-    }
+    setSlide(current => current % profileSlides.length)
+    setAvatarMotion('')
   }, [profileSlides.length])
+  useEffect(() => {
+    if (profileSlides.length < 2 || profileSwipe.dragging || avatarMotion) return undefined
+    const timer = window.setInterval(() => setAvatarMotion(current => current || 'next'), 4200)
+    return () => window.clearInterval(timer)
+  }, [profileSlides.length, profileSwipe.dragging, avatarMotion])
+  const finishAvatarMotion = () => {
+    if (!avatarMotion) return
+    setSlide(current => (current + (avatarMotion === 'next' ? 1 : -1) + profileSlides.length) % profileSlides.length)
+    setAvatarMotion('')
+  }
   useEffect(() => {
     let active = true
     const profileOwnerId = profile?.userId || user?.id
@@ -1036,6 +979,14 @@ function MyPageProfile({ user, profile, tracks = [], onBack }) {
   const saveProfile = async payload => { const next = await saveProfileCustomization({ userId: user.id, ...payload }); setProfileData(current => withProfileDisplayDefaults({ ...current, ...next })); const favoriteIndex = music.findIndex(track => track[3] === Number(next.favorite_track_id)); if (favoriteIndex >= 0) setTrackIndex(favoriteIndex) }
   const nickname = profile?.displayName || profile?.id || profileData.display_name
   const isAiProfile = Boolean(profileData.is_ai || profile?.isAi)
+  const aiProfileGallery = profile && isAiProfile
+    ? (profileData.avatar_urls || []).slice(1).map((url, index) => ({
+      id: `ai-profile-memory-${index}`,
+      signedUrl: assetSrc(url),
+      readOnly: true,
+    }))
+    : []
+  const visibleGallery = profile ? aiProfileGallery : gallery
   const fanStatSource = fanStats?.ownerId === (profile ? profile.userId : user?.id) ? fanStats.data : null
   const fanCred = Math.max(0, Number(fanStatSource?.fan_credit) || 0)
   const heatMaxCount = Math.max(0, Number(fanStatSource?.heat_max_count) || 0)
@@ -1055,7 +1006,7 @@ function MyPageProfile({ user, profile, tracks = [], onBack }) {
     ['tiktok', profileData.tiktok_url, 'TikTok'],
     ['youtube', profileData.youtube_url, 'YouTube'],
   ].filter(([, url]) => Boolean(url))
-  return <section className="my-page-profile"><div className="my-cover" style={{ backgroundImage: `linear-gradient(90deg,rgba(11,9,16,.83),rgba(10,8,15,.28)),url(${assetSrc(profileCoverSlides[slide])})` }}><button className="my-cover-back" type="button" onClick={onBack} aria-label="이전 화면으로 돌아가기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7" /></svg></button>{!profile && <button className="my-profile-edit-button" type="button" onClick={() => setProfileEditOpen(true)}>프로필 수정</button>}<div className="my-cover-copy"><h1>{nickname}</h1><button>♥ FOLLOW</button><p>{profile ? `${profile.artist}을 응원하며 팬들과 뜨거운 순간을 나누고 있습니다.` : profileData.profile_headline}</p><span>K-POP FAN</span>{!profile && socialLinks.length > 0 && <div className="my-profile-socials">{socialLinks.map(([type, url, label]) => <a className={`social-${type}`} href={url} target="_blank" rel="noreferrer" aria-label={`${label} 프로필 열기`} title={label} key={type}><SocialBrandIcon type={type} /></a>)}</div>}</div><button className="my-cover-play" onClick={toggleAudio} aria-label={playing ? '대표 음원 일시정지' : '대표 음원 재생'}>{playing ? 'Ⅱ' : '▶'}</button></div><div className="my-avatar-carousel"><button onClick={() => setSlide((slide - 1 + profileSlides.length) % profileSlides.length)} aria-label="이전 프로필">‹</button><img src={assetSrc(profileSlides[slide])} onError={event => { event.currentTarget.onerror = null; event.currentTarget.src = PROFILE_DISPLAY_DEFAULTS.avatar_url }} alt={`${nickname} 프로필`} />{isAiProfile && <span className="ai-profile-badge" aria-label="FANHEAT AI 프로필"><i aria-hidden="true">✦</i><b>AI</b><i aria-hidden="true">✦</i></span>}<button onClick={() => setSlide((slide + 1) % profileSlides.length)} aria-label="다음 프로필">›</button><div>{profileSlides.map((_, index) => <i key={index} className={slide === index ? 'active' : ''} />)}</div></div><div className="my-profile-body">{fanStatsError && <p role="status">{fanStatsError}</p>}{!fanStatSource && !fanStatsError && <p role="status">활동 통계를 불러오는 중입니다.</p>}{fanStatSource && <section className="my-resources"><article className={heat === 100 ? 'heat-range-card is-max' : 'heat-range-card'}><header><strong>HEAT RANGE</strong><div className="heat-range-level"><span>{heat}%</span><button className="fan-stats-guide-button" type="button" onClick={() => setStatsGuideType('heat')} aria-label="HEAT RANGE 안내 보기">?</button></div></header><div><i style={{ width: `${heat}%` }} /></div><footer>{heat === 100 ? <b>MAX · 100% 달성</b> : <small>활동을 이어가면 100% 달성</small>}</footer></article><article className="fan-cred-card"><header><strong>FAN CREDIT</strong><div className="fan-credit-level"><span>LV.{fanLevel}</span><button className="fan-stats-guide-button" type="button" onClick={() => setStatsGuideType('credit')} aria-label="FAN CREDIT 안내 보기">?</button></div></header><div><i style={{ width: `${Math.max(0, Math.min(100, credProgress))}%` }} /></div><footer><b>{fanCred.toLocaleString()} FC</b><small>다음 레벨까지 {fanLevelStats.creditToNextLevel.toLocaleString()} FC</small></footer></article><dl><div><dt>MAX</dt><dd><b>{heatMaxCount.toLocaleString()}회</b><small>100% 달성</small></dd></div><div><dt>TTL</dt><dd><b>{heatDaysRemaining}일</b><small>HEAT 소멸까지</small></dd></div><div className="fan-cred-summary"><dt>RANK</dt><dd><b>{fanRankPosition ? `${fanRankPosition.toLocaleString()}위 / ${fanRankTotal.toLocaleString()}명` : '미집계'}</b><small>{fanRankPosition ? `상위 ${fanTopPercent}%` : 'FC 적립 후 순위 반영'}</small></dd></div></dl></section>}<p className="my-intro">{profile ? '음악과 무대를 사랑하는 FAN HEAT 사용자입니다.' : profileData.bio}</p>{!profile && <section className="my-gallery"><header><div><h2>나의 사진</h2><p>나만의 순간을 썸네일로 모아보세요.</p></div><span>{gallery.length} / 10</span></header><div className="my-gallery-grid">{gallery.map((item, index) => <figure key={item.id}><img src={item.signedUrl} alt={'나의 사진 ' + (index + 1) + ' 크게 보기'} role="button" tabIndex="0" onClick={() => setGalleryLightboxIndex(index)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setGalleryLightboxIndex(index) } }} /><button type="button" onClick={() => removeGalleryImage(item)} disabled={galleryBusy} aria-label={`나의 사진 ${index + 1} 삭제`}>×</button></figure>)}{gallery.length < 10 && <button className="my-gallery-add" type="button" onClick={() => galleryInput.current?.click()} disabled={galleryBusy}><b>＋</b><span>{galleryBusy ? '처리 중' : '사진 추가'}</span></button>}</div><input ref={galleryInput} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={addGalleryImages} />{galleryStatus && <p className="my-gallery-status" role="status">{galleryStatus}</p>}<small>JPG · PNG · WebP / 장당 최대 15MB</small></section>}{/* My Music is intentionally disabled for now. Set USER_MUSIC_PLAYBACK_ENABLED to true to restore it. */}{USER_MUSIC_PLAYBACK_ENABLED && <section className="my-music"><header><h2>My뮤직</h2><span>Total : {music.length}</span></header>{music.map((item, index) => <button key={item[3]} className={trackIndex === index ? 'active' : ''} onClick={() => chooseTrack(index)}><b>{index + 1}</b><img src={assetSrc(item[0])} alt="" /><span><strong>{item[1]}</strong><small>{item[2]}</small></span><em>{trackIndex === index && playing ? 'Ⅱ' : '▶'}</em></button>)}</section>}</div>{galleryLightboxIndex !== null && gallery.length > 0 && <ImageLightbox images={gallery.map((item, index) => ({ type: 'image', src: item.signedUrl, imageIndex: index }))} initialIndex={galleryLightboxIndex} title={nickname + ' 나의 이미지'} onClose={() => setGalleryLightboxIndex(null)} />}<MyPageAudioPlayer track={music[trackIndex]} playing={playing} onPlayingChange={setPlaying} onPrevious={() => moveTrack(-1)} onNext={() => moveTrack(1)} />{statsGuideType && <FanStatsGuide type={statsGuideType} onClose={() => setStatsGuideType(null)} />}{!profile && profileEditOpen && <ProfileEditModal initial={profileData} music={music} gallery={gallery} busy={galleryBusy} status={galleryStatus} onAddGallery={addGalleryImages} onRemoveGallery={removeGalleryImage} onClose={() => setProfileEditOpen(false)} onSave={saveProfile} />}</section>
+  return <section className="my-page-profile"><div className="my-cover" style={{ backgroundImage: `linear-gradient(90deg,rgba(11,9,16,.83),rgba(10,8,15,.28)),url(${assetSrc(profileCoverSlides[slide])})` }}><button className="my-cover-back" type="button" onClick={onBack} aria-label="이전 화면으로 돌아가기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7" /></svg></button>{!profile && <button className="my-profile-edit-button" type="button" onClick={() => setProfileEditOpen(true)}>프로필 수정</button>}<div className="my-cover-copy"><h1>{nickname}</h1><button>♥ FOLLOW</button><p>{profileData.profile_headline}</p><span>K-POP FAN</span>{!profile && socialLinks.length > 0 && <div className="my-profile-socials">{socialLinks.map(([type, url, label]) => <a className={`social-${type}`} href={url} target="_blank" rel="noreferrer" aria-label={`${label} 프로필 열기`} title={label} key={type}><SocialBrandIcon type={type} /></a>)}</div>}</div><button className="my-cover-play" onClick={toggleAudio} aria-label={playing ? '대표 음원 일시정지' : '대표 음원 재생'}>{playing ? 'Ⅱ' : '▶'}</button></div><div className={`my-avatar-carousel ${profileSwipe.dragging ? 'is-dragging' : ''}`}><button type="button" onClick={() => beginAvatarMotion('prev')} disabled={Boolean(avatarMotion)} aria-label="이전 프로필">‹</button><div className="my-avatar-viewport" {...profileSwipe.bind}><div className={`my-avatar-track ${avatarMotion ? `move-${avatarMotion}` : ''}`} style={!avatarMotion && profileSwipe.dragOffset ? { transform: `translate3d(calc(-33.333333% + ${profileSwipe.dragOffset}px),0,0)` } : undefined} onTransitionEnd={finishAvatarMotion}>{[-1, 0, 1].map(offset => { const index = (slide + offset + profileSlides.length) % profileSlides.length; return <img src={assetSrc(profileSlides[index])} onError={event => { event.currentTarget.onerror = null; event.currentTarget.src = PROFILE_DISPLAY_DEFAULTS.avatar_url }} alt={offset === 0 ? `${nickname} 프로필` : ''} aria-hidden={offset !== 0} draggable="false" key={`${index}-${offset}`} /> })}</div></div>{isAiProfile && <span className="ai-profile-badge" aria-label="FANHEAT AI 프로필"><i aria-hidden="true">✦</i><b>AI</b><i aria-hidden="true">✦</i></span>}<button type="button" onClick={() => beginAvatarMotion('next')} disabled={Boolean(avatarMotion)} aria-label="다음 프로필">›</button><div>{profileSlides.map((_, index) => <i key={index} className={slide === index ? 'active' : ''} />)}</div></div><div className="my-profile-body">{fanStatsError && <p role="status">{fanStatsError}</p>}{!fanStatSource && !fanStatsError && <p role="status">활동 통계를 불러오는 중입니다.</p>}{fanStatSource && <section className="my-resources"><article className={heat === 100 ? 'heat-range-card is-max' : 'heat-range-card'}><header><strong>HEAT RANGE</strong><div className="heat-range-level"><span>{heat}%</span><button className="fan-stats-guide-button" type="button" onClick={() => setStatsGuideType('heat')} aria-label="HEAT RANGE 안내 보기">?</button></div></header><div><i style={{ width: `${heat}%` }} /></div><footer>{heat === 100 ? <b>MAX · 100% 달성</b> : <small>활동을 이어가면 100% 달성</small>}</footer></article><article className="fan-cred-card"><header><strong>FAN CREDIT</strong><div className="fan-credit-level"><span>LV.{fanLevel}</span><button className="fan-stats-guide-button" type="button" onClick={() => setStatsGuideType('credit')} aria-label="FAN CREDIT 안내 보기">?</button></div></header><div><i style={{ width: `${Math.max(0, Math.min(100, credProgress))}%` }} /></div><footer><b>{fanCred.toLocaleString()} FC</b><small>다음 레벨까지 {fanLevelStats.creditToNextLevel.toLocaleString()} FC</small></footer></article><dl><div><dt>MAX</dt><dd><b>{heatMaxCount.toLocaleString()}회</b><small>100% 달성</small></dd></div><div><dt>TTL</dt><dd><b>{heatDaysRemaining}일</b><small>HEAT 소멸까지</small></dd></div><div className="fan-cred-summary"><dt>RANK</dt><dd><b>{fanRankPosition ? `${fanRankPosition.toLocaleString()}위 / ${fanRankTotal.toLocaleString()}명` : '미집계'}</b><small>{fanRankPosition ? `상위 ${fanTopPercent}%` : 'FC 적립 후 순위 반영'}</small></dd></div></dl></section>}<p className="my-intro">{profileData.bio}</p>{(!profile || aiProfileGallery.length > 0) && <section className="my-gallery"><header><div><h2>{profile ? '프로필 사진' : '나의 사진'}</h2><p>{profile ? `${nickname}의 소중한 순간을 모았습니다.` : '나만의 순간을 썸네일로 모아보세요.'}</p></div><span>{profile ? visibleGallery.length : `${visibleGallery.length} / 10`}</span></header><div className="my-gallery-grid">{visibleGallery.map((item, index) => <figure key={item.id}><img src={item.signedUrl} alt={`${profile ? `${nickname} 프로필 사진` : '나의 사진'} ${index + 1} 크게 보기`} role="button" tabIndex="0" onClick={() => setGalleryLightboxIndex(index)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setGalleryLightboxIndex(index) } }} />{!profile && <button type="button" onClick={() => removeGalleryImage(item)} disabled={galleryBusy} aria-label={`나의 사진 ${index + 1} 삭제`}>×</button>}</figure>)}{!profile && gallery.length < 10 && <button className="my-gallery-add" type="button" onClick={() => galleryInput.current?.click()} disabled={galleryBusy}><b>＋</b><span>{galleryBusy ? '처리 중' : '사진 추가'}</span></button>}</div>{!profile && <><input ref={galleryInput} type="file" accept="image/jpeg,image/png,image/webp" multiple hidden onChange={addGalleryImages} />{galleryStatus && <p className="my-gallery-status" role="status">{galleryStatus}</p>}<small>JPG · PNG · WebP / 장당 최대 15MB</small></>}</section>}{/* My Music is intentionally disabled for now. Set USER_MUSIC_PLAYBACK_ENABLED to true to restore it. */}{USER_MUSIC_PLAYBACK_ENABLED && <section className="my-music"><header><h2>My뮤직</h2><span>Total : {music.length}</span></header>{music.map((item, index) => <button key={item[3]} className={trackIndex === index ? 'active' : ''} onClick={() => chooseTrack(index)}><b>{index + 1}</b><img src={assetSrc(item[0])} alt="" /><span><strong>{item[1]}</strong><small>{item[2]}</small></span><em>{trackIndex === index && playing ? 'Ⅱ' : '▶'}</em></button>)}</section>}</div>{galleryLightboxIndex !== null && visibleGallery.length > 0 && <ImageLightbox images={visibleGallery.map((item, index) => ({ type: 'image', src: item.signedUrl, imageIndex: index }))} initialIndex={galleryLightboxIndex} title={nickname + ' 프로필 이미지'} onClose={() => setGalleryLightboxIndex(null)} />}<MyPageAudioPlayer track={music[trackIndex]} playing={playing} onPlayingChange={setPlaying} onPrevious={() => moveTrack(-1)} onNext={() => moveTrack(1)} />{statsGuideType && <FanStatsGuide type={statsGuideType} onClose={() => setStatsGuideType(null)} />}{!profile && profileEditOpen && <ProfileEditModal initial={profileData} music={music} gallery={gallery} busy={galleryBusy} status={galleryStatus} onAddGallery={addGalleryImages} onRemoveGallery={removeGalleryImage} onClose={() => setProfileEditOpen(false)} onSave={saveProfile} />}</section>
 }
 
 function MessageCenter({ user, onUnreadChange }) {
@@ -1154,6 +1105,13 @@ function MessageCenter({ user, onUnreadChange }) {
     </div>}
     {composeOpen && <div className="message-compose-overlay" role="presentation" onMouseDown={event => event.target === event.currentTarget && setComposeOpen(false)}><form className="message-compose" onSubmit={submit} role="dialog" aria-modal="true" aria-labelledby="message-compose-title"><header><div><small>{replyToId ? 'REPLY MESSAGE' : 'NEW MESSAGE'}</small><h2 id="message-compose-title">{replyToId ? '쪽지 답장' : '새 쪽지'}</h2></div><button type="button" onClick={() => setComposeOpen(false)} aria-label="쪽지 작성 닫기">×</button></header><label><span>받는 사람</span><select value={recipientId} onChange={event => setRecipientId(event.target.value)} required><option value="">사용자를 선택해 주세요</option>{contacts.filter(contact => !blocks.some(block => block.blocked_user_id === contact.id)).map(contact => <option value={contact.id} key={contact.id}>{contact.display_name || 'FAN'}</option>)}</select></label><label><span>쪽지 내용</span><textarea value={body} onChange={event => setBody(event.target.value)} maxLength="2000" placeholder="팬에게 전할 이야기를 입력해 주세요." required /><small>{body.length.toLocaleString()} / 2,000</small></label><footer><button type="button" onClick={() => setComposeOpen(false)}>취소</button><button type="submit" disabled={busy || !recipientId || !body.trim()}>{busy ? '보내는 중…' : '쪽지 보내기'}</button></footer></form></div>}
   </section>
+}
+
+function MyPostListThumbnail({ title, image, data }) {
+  const storedImage = image || (Array.isArray(data?.images) ? data.images.find(Boolean) : '')
+  const source = storedImage ? assetSrc(storedImage) : youtubeThumbnailUrl(data?.reference_url || data?.source_url)
+  if (!source) return <span className="my-post-thumbnail my-post-thumbnail-empty" aria-label="등록된 이미지 없음">이미지 없음</span>
+  return <img className="my-post-thumbnail" src={source} alt={`${title || '포스트'} 썸네일`} />
 }
 
 function MyPageContent({ user, posts: items, followers, unreadMessageCount = 0, onSelect, onOpenFriend, onUnreadChange, initialTab = 'posts', publicProfile = null }) {
@@ -1275,10 +1233,10 @@ function MyPageContent({ user, posts: items, followers, unreadMessageCount = 0, 
       {!commentError && !commentItems.length && <p className="my-comment-empty">아직 작성한 댓글이 없습니다.</p>}
       {!commentError && commentItems.length > 0 && !sortedCommentItems.length && <p className="my-comment-empty">검색 결과가 없습니다.</p>}
       {pagedCommentItems.map(({ comment, item }, index) => {
-        const [title = '삭제되었거나 비공개된 포스트', image = 'post_list1.jpg', data = {}] = item || []
+        const [title = '삭제되었거나 비공개된 포스트', image = '', data = {}] = item || []
         return <button key={comment.id} onClick={() => item && onSelect({ title, image, index: items.indexOf(item), data, editCommentId: comment.id })} disabled={!item}>
           <span className="my-comment-rank">{String((commentPage - 1) * commentPageSize + index + 1).padStart(2, '0')}</span>
-          <img src={assetSrc(image)} alt="" />
+          {image && <img src={assetSrc(image)} alt="" />}
           <span className="my-comment-copy"><q>{comment.body}</q><span className="my-comment-reactions"><span aria-label={`좋아요 ${Number(comment.like_count || 0).toLocaleString()}건`}><span aria-hidden="true">👍</span> 좋아요 {Number(comment.like_count || 0).toLocaleString()}건</span><i aria-hidden="true">·</i><span aria-label={`싫어요 ${Number(comment.dislike_count || 0).toLocaleString()}건`}><span aria-hidden="true">👎</span> 싫어요 {Number(comment.dislike_count || 0).toLocaleString()}건</span></span></span>
           <time>{new Date(comment.created_at).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' })}</time>
           <em><span>포스트 보기</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M6 14 14 6m-6 0h6v6" /></svg></em>
@@ -1295,10 +1253,10 @@ function MyPageContent({ user, posts: items, followers, unreadMessageCount = 0, 
         const authorName = String(data?.author_display_name || user?.user_metadata?.display_name || 'FANHEAT').trim().replace(/^@/, '')
         const authorId = authorName.replace(/\s+/g, '_')
         return <article key={data?.id || `${title}-${index}`} onClick={() => onSelect({ title, image, index, data })} tabIndex="0">
-          <span className="my-post-rank">{index + 1}<i>•••</i></span><img src={assetSrc(image)} alt="" />
+          <span className="my-post-rank">{index + 1}<i>•••</i></span><MyPostListThumbnail title={title} image={image} data={data} />
           <div className="my-post-copy">{title && <h3>{title}</h3>}{data?.summary && <p>{data.summary}</p>}<PostMetadata className="my-post-meta" viewCount={data?.view_count || 0} giftCount={data?.gift_count || 0} commentCount={data?.comment_count || 0} authorId={authorId} /></div>
           <time>{new Date(data?.created_at || Date.now()).toLocaleDateString('ko-KR')}</time>
-          <HeatVote initialCount={data?.vote_count || voteCounts[index] || 28} />
+          <HeatVote initialCount={data?.vote_count ?? 0} />
         </article>
       })}
       <footer className="my-board-footer my-board-footer-summary"><span>Total <b>{filteredPosts.length}</b></span></footer>
@@ -1306,14 +1264,19 @@ function MyPageContent({ user, posts: items, followers, unreadMessageCount = 0, 
   </section>
 }
 
-function Awards({ items = awards, rankings = {}, onSelect, onViewAll }) {
+function Awards({ items = [], rankings = {}, onSelect, onViewAll }) {
   const { locale, t } = useI18n()
-  const [period, setPeriod] = useState('Weeks')
+  const [period, setPeriod] = useState('Today')
   const [page, setPage] = useState(0)
   const [pageCount, setPageCount] = useState(2)
   const [paused, setPaused] = useState(false)
   const track = useRef(null)
   const periodKey = { Today: 'today', Weeks: 'week', Month: 'month' }[period]
+  const popularityTitle = ({
+    ko: { today: '오늘 인기 아티스트', week: '주간 인기 아티스트', month: '월간 인기 아티스트' },
+    en: { today: "Today's Popular Artists", week: 'Weekly Popular Artists', month: 'Monthly Popular Artists' },
+    ja: { today: '今日の人気アーティスト', week: '週間人気アーティスト', month: '月間人気アーティスト' },
+  }[locale] || {})[periodKey] || t('awards')
   const periodMetrics = rankings[periodKey] || []
   const metricByArtist = new Map(periodMetrics.map(metric => [String(metric.artist_id), metric]))
   const sourceItems = items.slice(0, 50)
@@ -1334,7 +1297,9 @@ function Awards({ items = awards, rankings = {}, onSelect, onViewAll }) {
     const previousScore = index ? Number(entries[index - 1].metric?.ranking_score ?? entries[index - 1].fallbackScore) : null
     const previousRank = index ? Number(entries[index - 1].computedRank) : 1
     entry.computedRank = index && score === previousScore ? previousRank : index + 1
-    return { ...entry, rank: entry.computedRank, change: 0, score: score.toLocaleString('ko-KR') }
+    const clicks = Number(entry.metric?.click_count || 0)
+    const fans = Number(entry.metric?.fan_growth || 0)
+    return { ...entry, rank: entry.computedRank, change: 0, score: score.toLocaleString('ko-KR'), activity: `클릭 ${clicks.toLocaleString('ko-KR')} · 팬 +${fans.toLocaleString('ko-KR')}` }
   })
   const measure = () => {
     if (!track.current) return
@@ -1371,15 +1336,15 @@ function Awards({ items = awards, rankings = {}, onSelect, onViewAll }) {
     track.current?.scrollTo({ left: 0, behavior: 'smooth' })
   }, [period])
   return <section className="awards" id="awards">
-    <div className="section-head"><div className="section-title"><h2>{t('awards')}</h2><button className="view-all-artists" onClick={onViewAll}>{({ ko: '전체', en: 'All', ja: 'すべて' })[locale] || '전체'} <span>›</span></button></div>
+    <div className="section-head"><div className="section-title"><h2>{popularityTitle}</h2><button className="view-all-artists" onClick={onViewAll}>{({ ko: '전체', en: 'All', ja: 'すべて' })[locale] || '전체'} <span>›</span></button></div>
       <div className="periods">{[['Today','today'], ['Weeks','weeks'], ['Month','month']].map(([item,key]) => <button className={period === item ? 'active' : ''} onClick={() => setPeriod(item)} key={item}>{t(key)}</button>)}</div>
     </div>
     <div className="award-carousel" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
       <button className="award-arrow prev" onClick={() => goTo(page - 1)} aria-label="이전 어워즈">‹</button>
-      <div className="award-grid" ref={track}>{rankedItems.map(({ item, originalIndex, rank, score }) => { const [name, , image] = item; const trendLabel = '현재 기간 활동 점수 기준'; return <article key={`${period}-${name}-${originalIndex}`}>
+      <div className="award-grid" ref={track}>{rankedItems.map(({ item, originalIndex, rank, activity }) => { const [name, , image] = item; const trendLabel = '원데이 투표와 별개인 클릭·팬 활동 기준'; return <article key={`${period}-${name}-${originalIndex}`}>
         <button className="award-card" onClick={() => { recordArtistClick(item[3]?.id).catch(() => {}); onSelect?.(makeStarProfile(item)) }} aria-label={`${name}, ${rank}위, ${trendLabel}`}>
           <span className="award-image"><img src={assetSrc(image)} alt={name} /></span>
-          <span className="award-caption"><strong><i>{rank}위</i> {name}</strong><small>{score}</small><em className="rank-change same" title={trendLabel}>—</em></span>
+          <span className="award-caption"><strong><i>{rank}위</i> {name}</strong><small>{activity}</small><em className="rank-change same" title={trendLabel}>—</em></span>
         </button>
       </article> })}</div>
       <button className="award-arrow next" onClick={() => goTo(page + 1)} aria-label="다음 어워즈">›</button>
@@ -1410,9 +1375,89 @@ function ArtistDirectory({ items, query, setQuery, onSelect }) {
   </section>
 }
 
-function StarVisual({ star, onClose }) {
-  const [liked, setLiked] = useState(false)
-  const profileImages = [...new Set([star.image, star.heroImage, ...(star.gallery || [])].filter(Boolean))]
+function useArtistEngagement(star, user, onLogin) {
+  const [following, setFollowing] = useState(false)
+  const [followerCount, setFollowerCount] = useState(Number(star.followers || 0))
+  const [fan, setFan] = useState(null)
+  const [busy, setBusy] = useState('')
+  const [error, setError] = useState('')
+  useEffect(() => {
+    let active = true
+    setFollowerCount(Number(star.followers || 0)); setFollowing(false); setFan(null); setError('')
+    if (!user?.id || !star.id) return undefined
+    loadArtistEngagement(user.id, star.id).then(result => { if (active) { setFollowing(result.following); setFan(result.fan) } }).catch(loadError => { if (active) setError(loadError.message) })
+    return () => { active = false }
+  }, [star.id, star.followers, user?.id])
+  useEffect(() => {
+    const sync = event => {
+      if (Number(event.detail?.artistId) !== Number(star.id)) return
+      if (typeof event.detail.following === 'boolean') setFollowing(event.detail.following)
+      if (Number.isFinite(event.detail.followerCount)) setFollowerCount(event.detail.followerCount)
+    }
+    window.addEventListener('fanheat:artist-engagement', sync)
+    return () => window.removeEventListener('fanheat:artist-engagement', sync)
+  }, [star.id])
+  const toggleFollowing = async () => {
+    if (!user) { onLogin(); return }
+    const next = !following
+    setBusy('follow'); setError('')
+    try {
+      await setArtistFollowing(user.id, star.id, next)
+      const nextCount = Math.max(0, followerCount + (next ? 1 : -1))
+      setFollowing(next); setFollowerCount(nextCount)
+      window.dispatchEvent(new CustomEvent('fanheat:artist-engagement', { detail: { artistId: star.id, following: next, followerCount: nextCount } }))
+    } catch (toggleError) { setError(toggleError.message) }
+    finally { setBusy('') }
+  }
+  const toggleFan = async () => {
+    if (!user) { onLogin(); return null }
+    setBusy('fan'); setError('')
+    try {
+      const nextFan = await setArtistFanRegistration(user.id, star.id, !fan)
+      setFan(nextFan)
+      return nextFan
+    } catch (toggleError) { setError(toggleError.message); return undefined }
+    finally { setBusy('') }
+  }
+  return { following, followerCount, fan, busy, error, toggleFollowing, toggleFan }
+}
+
+const artistSocialChannels = [
+  ['facebookUrl', 'facebook', 'Facebook'],
+  ['xUrl', 'twitter', 'X'],
+  ['instagramUrl', 'instagram', 'Instagram'],
+]
+
+const safeArtistSocialUrl = value => {
+  try {
+    const parsed = new URL(String(value || '').trim())
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:' ? parsed.href : ''
+  } catch {
+    return ''
+  }
+}
+
+function ArtistSocialIcon({ type }) {
+  if (type === 'facebook') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 8h3V4h-3c-3.3 0-5 2-5 5v2H6v4h3v9h4v-9h3l1-4h-4V9c0-.7.3-1 1-1Z" /></svg>
+  if (type === 'instagram') return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="12" cy="12" r="4.2" /><circle cx="17.5" cy="6.7" r="1" className="instagram-dot" /></svg>
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18.9 2H22l-6.8 7.8L23.2 22H17l-4.8-6.3L6.7 22H3.6l7.1-8.2L3 2h6.3l4.4 5.8L18.9 2Zm-1.1 17.8h1.7L8.3 4.1H6.5l11.3 15.7Z" /></svg>
+}
+
+function ArtistSocialLinks({ star, mobile = false }) {
+  return <div className={mobile ? 'star-mobile-socials' : 'star-socials'} aria-label="아티스트 공식 소셜 채널">
+    {artistSocialChannels.map(([field, type, label]) => {
+      const url = safeArtistSocialUrl(star[field])
+      const icon = <ArtistSocialIcon type={type} />
+      return url
+        ? <a className={type} href={url} target="_blank" rel="noopener noreferrer" aria-label={`${star.name} 공식 ${label} 열기`} title={`${label} 공식 채널`} key={field}>{icon}</a>
+        : <span className={`${type} is-unavailable`} role="img" aria-label={`${star.name} 공식 ${label} 정보 없음`} aria-disabled="true" title={`${label} 공식 채널 정보 없음`} key={field}>{icon}</span>
+    })}
+  </div>
+}
+
+function StarVisual({ star, onClose, user, onLogin }) {
+  const engagement = useArtistEngagement(star, user, onLogin)
+  const profileImages = [...new Set((star.profileImages?.length ? star.profileImages : [star.image]).filter(Boolean))]
   if (!profileImages.length) profileImages.push('/images/icon_member.png')
   const [profileSlide, setProfileSlide] = useState(0)
   const [profileDirection, setProfileDirection] = useState('next')
@@ -1422,19 +1467,15 @@ function StarVisual({ star, onClose }) {
   return <section className="star-visual" aria-label={`${star.name} 프로필`}>
     <aside className="star-profile">
       <button className="star-back" onClick={onClose} aria-label="메인으로 돌아가기">‹</button>
-      <button className={`star-like ${liked ? 'active' : ''}`} onClick={() => setLiked(value => !value)} aria-pressed={liked} aria-label="스타 좋아요">♥</button>
+      <button className={`star-like ${engagement.following ? 'active' : ''}`} onClick={engagement.toggleFollowing} disabled={engagement.busy === 'follow'} aria-pressed={engagement.following} aria-label={engagement.following ? `${star.name} 팔로우 취소` : `${star.name} 팔로우`}>♥</button>
       <div className={`star-avatar-carousel ${profileSwipe.dragging ? 'dragging' : ''}`} {...profileSwipe.bind}>
         <img key={`${profileImages[profileSlide]}-${profileSlide}`} className={`star-avatar ${profileDirection}`} style={{ transform: `translateX(${profileSwipe.dragOffset}px)` }} src={assetSrc(profileImages[profileSlide])} alt={`${star.name} 프로필 ${profileSlide + 1}`} draggable="false" />
       </div>
       <div className="star-profile-dots">{profileImages.map((_, index) => <button key={index} className={profileSlide === index ? 'active' : ''} onClick={() => showProfileSlide(index, index >= profileSlide ? 'next' : 'prev')} aria-label={`${index + 1}번째 프로필 이미지`} />)}</div>
       <div className="star-facts"><small>PROFILE</small><h1>{star.realName}</h1><p>{star.role}</p><dl><div><dt>데뷔</dt><dd>{star.debut}</dd></div><div><dt>소속사</dt><dd>{star.agency}</dd></div><div><dt>팬덤</dt><dd>{star.fandom}</dd></div></dl></div>
-      <div className="star-followers"><small>FOLLOWER</small><strong>{star.followers.toLocaleString()}</strong><span>명</span></div>
+      <div className="star-followers"><small>FOLLOWER</small><strong>{engagement.followerCount.toLocaleString()}</strong><span>명</span>{engagement.error && <em role="alert">{engagement.error}</em>}</div>
       <div className="star-visitors"><small>VISITOR</small><p>Today : {(star.visitorToday || 454842).toLocaleString()}</p><p>Total : {(star.visitorTotal || 405541258).toLocaleString()}</p></div>
-      <div className="star-socials">
-        <button className="facebook" aria-label="Facebook"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M14 8h3V4h-3c-3.3 0-5 2-5 5v2H6v4h3v9h4v-9h3l1-4h-4V9c0-.7.3-1 1-1Z" /></svg></button>
-        <button className="twitter" aria-label="Twitter"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M22 5.8c-.7.3-1.5.5-2.3.6.8-.5 1.5-1.3 1.8-2.2-.8.5-1.7.8-2.6 1a4 4 0 0 0-6.9 2.7c0 .3 0 .6.1.9A11.5 11.5 0 0 1 3.7 4.5a4 4 0 0 0 1.3 5.4c-.7 0-1.3-.2-1.8-.5 0 2 1.4 3.7 3.3 4-.4.1-.8.2-1.1.2l-.8-.1a4 4 0 0 0 3.8 2.8A8.2 8.2 0 0 1 3.3 18H2a11.4 11.4 0 0 0 6.2 1.8c7.5 0 11.6-6.2 11.6-11.6v-.5c.8-.5 1.5-1.2 2.2-1.9Z" /></svg></button>
-        <button className="instagram" aria-label="Instagram"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="5" /><circle cx="12" cy="12" r="4.2" /><circle cx="17.5" cy="6.7" r="1" className="instagram-dot" /></svg></button>
-      </div>
+      <ArtistSocialLinks star={star} />
     </aside>
     <div className="star-portrait"><img src={assetSrc(star.heroImage || star.image)} alt={`${star.name} 고해상도 대표 이미지`} />{star.imageCredit && <a className="star-image-credit" href={star.imageCreditUrl} target="_blank" rel="noreferrer">Photo: {star.imageCredit}</a>}</div>
   </section>
@@ -1527,12 +1568,15 @@ const starGalleryCardCopy = [
 ]
 
 function StarGallery({ star }) {
-  const [periodMonths, setPeriodMonths] = useState(6)
+  const [periodMonths, setPeriodMonths] = useState('all')
+  const [visibleCount, setVisibleCount] = useState(10)
   const [lightboxIndex, setLightboxIndex] = useState(null)
+  const sentinel = useRef(null)
   const galleryItems = (star.galleryItems || []).filter(isApprovedArtistGalleryItem).map(item => ({ image: item.image_url, title: item.title, date: item.captured_on?.replaceAll('-', '.') || '', timestamp: item.captured_on ? new Date(`${item.captured_on}T00:00:00`).getTime() : Date.now(), creator: item.creator_name || '', license: item.license_name || '', licenseUrl: item.license_url || '', sourceUrl: item.source_page_url || '', attribution: item.attribution_text || '' }))
-  const periodStart = new Date()
-  periodStart.setMonth(periodStart.getMonth() - periodMonths)
-  const visibleItems = galleryItems.filter(item => item.timestamp >= periodStart.getTime())
+  const periodStart = periodMonths === 'all' ? null : new Date()
+  periodStart?.setMonth(periodStart.getMonth() - periodMonths)
+  const filteredItems = periodStart ? galleryItems.filter(item => item.timestamp >= periodStart.getTime()) : galleryItems
+  const visibleItems = filteredItems.slice(0, visibleCount)
   const lightboxImages = visibleItems.map((item, index) => ({
     type: 'image',
     src: item.image,
@@ -1543,11 +1587,23 @@ function StarGallery({ star }) {
     licenseLabel: item.license,
     licenseUrl: item.licenseUrl,
   }))
-  useEffect(() => setLightboxIndex(null), [star.id, periodMonths])
+  useEffect(() => {
+    setLightboxIndex(null)
+    setVisibleCount(10)
+  }, [star.id, periodMonths])
+  useEffect(() => {
+    const node = sentinel.current
+    if (!node || visibleCount >= filteredItems.length) return undefined
+    const observer = new IntersectionObserver(entries => {
+      if (entries[0]?.isIntersecting) setVisibleCount(count => Math.min(count + 10, filteredItems.length))
+    }, { rootMargin: '240px' })
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [visibleCount, filteredItems.length])
   return <section className="star-gallery-section">
     <div className="star-gallery-toolbar">
-      <div className="star-gallery-periods" role="tablist" aria-label="갤러리 조회 기간">{[3, 6, 12].map(months => <button type="button" role="tab" aria-selected={periodMonths === months} className={periodMonths === months ? 'active' : ''} onClick={() => setPeriodMonths(months)} key={months}>{months} Months</button>)}</div>
-      <span>{visibleItems.length} PHOTOS</span>
+      <div className="star-gallery-periods" role="tablist" aria-label="갤러리 조회 기간">{['all', 3, 6, 12].map(period => <button type="button" role="tab" aria-selected={periodMonths === period} className={periodMonths === period ? 'active' : ''} onClick={() => setPeriodMonths(period)} key={period}>{period === 'all' ? 'All' : `${period} Months`}</button>)}</div>
+      <span>{filteredItems.length} PHOTOS</span>
     </div>
     <div className="star-gallery-grid">
       {visibleItems.map(({ image, title, date }, index) => {
@@ -1557,28 +1613,28 @@ function StarGallery({ star }) {
         </article>
       })}
     </div>
-    {!visibleItems.length && <p className="star-gallery-empty">선택한 기간에 등록된 사진이 없습니다.</p>}
-    {visibleItems.some(item => item.attribution) && <footer className="star-gallery-credits"><h3>IMAGE CREDITS</h3><ul>{visibleItems.filter(item => item.attribution).map((item, index) => <li key={`${item.image}-credit`}><span>{index + 1}. {item.attribution}</span>{item.sourceUrl && <a href={item.sourceUrl} target="_blank" rel="noopener noreferrer">출처</a>}{item.licenseUrl && <a href={item.licenseUrl} target="_blank" rel="noopener noreferrer">라이선스</a>}</li>)}</ul></footer>}
+    {!filteredItems.length && <p className="star-gallery-empty">선택한 기간에 등록된 사진이 없습니다.</p>}
+    <div className="star-gallery-sentinel" ref={sentinel} aria-live="polite">{visibleCount < filteredItems.length ? <span>이미지를 더 불러오는 중…</span> : filteredItems.length > 10 ? <span>모든 이미지를 확인했습니다.</span> : null}</div>
+    {visibleItems.some(item => item.attribution) && <details className="star-gallery-credits"><summary><span>IMAGE CREDITS</span><small>{visibleItems.filter(item => item.attribution).length}개 이미지</small></summary><div className="star-gallery-credit-panel"><ul>{visibleItems.filter(item => item.attribution).map((item, index) => <li key={`${item.image}-credit`}><span>{index + 1}. {item.attribution}</span><nav aria-label={`${index + 1}번째 이미지 크레딧 링크`}>{item.sourceUrl && <a href={item.sourceUrl} target="_blank" rel="noopener noreferrer">출처</a>}{item.licenseUrl && <a href={item.licenseUrl} target="_blank" rel="noopener noreferrer">라이선스</a>}</nav></li>)}</ul></div></details>}
     {lightboxIndex !== null && <ImageLightbox images={lightboxImages} initialIndex={lightboxIndex} title={`${star.name} 갤러리`} onClose={() => setLightboxIndex(null)} />}
   </section>
 }
 
-function StarMobileOverview({ star }) {
-  const [liked, setLiked] = useState(false)
-  const profileImages = (star.gallery?.length ? star.gallery : [star.heroImage || star.image || '/images/icon_member.png']).slice(0, 3)
+function StarMobileOverview({ star, engagement }) {
+  const profileImages = (star.profileImages?.length ? star.profileImages : [star.image || '/images/icon_member.png']).slice(0, 10)
   const [profileSlide, setProfileSlide] = useState(0)
   useEffect(() => { setProfileSlide(0) }, [star.id])
   const profileSwipe = useSwipeCarousel({ length: profileImages.length, index: profileSlide, onChange: setProfileSlide, threshold: 24 })
   const profileImage = profileImages[profileSlide] || star.image
   return <article className="star-mobile-overview">
     <section className="star-mobile-identity">
-      <div className="star-mobile-cover"><img src={assetSrc(star.heroImage || star.image)} alt="" /><button type="button" className={liked ? 'active' : ''} onClick={() => setLiked(value => !value)} aria-pressed={liked} aria-label={`${star.name} 좋아요`}>♥</button></div>
+      <div className="star-mobile-cover"><img src={assetSrc(star.heroImage || star.image)} alt="" /><button type="button" className={engagement.following ? 'active' : ''} onClick={engagement.toggleFollowing} disabled={engagement.busy === 'follow'} aria-pressed={engagement.following} aria-label={engagement.following ? `${star.name} 팔로우 취소` : `${star.name} 팔로우`}>♥</button></div>
       <div className={`star-mobile-avatar ${profileSwipe.dragging ? 'dragging' : ''}`} {...profileSwipe.bind}><img src={assetSrc(profileImage)} style={{ transform: `translateX(${profileSwipe.dragOffset}px)` }} alt={`${star.name} 프로필`} draggable="false" /></div>
       {profileImages.length > 1 && <div className="star-mobile-profile-dots" aria-label="프로필 이미지 선택">{profileImages.map((image, index) => <button type="button" className={profileSlide === index ? 'active' : ''} onClick={() => setProfileSlide(index)} aria-label={`${index + 1}번째 프로필 이미지`} key={`${image}-${index}`} />)}</div>}
       <div className="star-mobile-name"><small>ARTIST PROFILE</small><h2>{star.realName || star.name}</h2><p>{star.role}</p></div>
       <dl className="star-mobile-facts"><div><dt>데뷔</dt><dd>{star.debut}</dd></div><div><dt>소속사</dt><dd>{star.agency}</dd></div><div><dt>팬덤</dt><dd>{star.fandom}</dd></div></dl>
-      <div className="star-mobile-stats"><section><small>FOLLOWERS</small><strong>{Number(star.followers || 0).toLocaleString()}</strong><span>명</span></section><section><small>VISITORS</small><p><span>오늘</span><b>{Number(star.visitorToday || 0).toLocaleString()}</b></p><p><span>전체</span><b>{Number(star.visitorTotal || 0).toLocaleString()}</b></p></section></div>
-      <div className="star-mobile-socials" aria-label="아티스트 소셜 채널"><button type="button" className="facebook" aria-label="Facebook">f</button><button type="button" className="twitter" aria-label="X">𝕏</button><button type="button" className="instagram" aria-label="Instagram">◎</button></div>
+      <div className="star-mobile-stats"><section><small>FOLLOWERS</small><strong>{engagement.followerCount.toLocaleString()}</strong><span>명</span></section><section><small>VISITORS</small><p><span>오늘</span><b>{Number(star.visitorToday || 0).toLocaleString()}</b></p><p><span>전체</span><b>{Number(star.visitorTotal || 0).toLocaleString()}</b></p></section></div>
+      <ArtistSocialLinks star={star} mobile />
     </section>
     <section className="star-mobile-bio"><header><small>ABOUT</small><h3>{star.name} 소개</h3></header>{star.bio.map(paragraph => <p key={paragraph}>{paragraph}</p>)}{!star.bio.length && <p className="star-gallery-empty">등록된 소개가 없습니다.</p>}</section>
     <div className="star-mobile-records"><section><header><small>TIMELINE</small><h3>HISTORY</h3></header><ul>{star.history.map((item, index) => <li key={`${item.year}-${item.text}-${index}`}><time>{item.year}</time><span>{item.text}</span></li>)}</ul>{!star.history.length && <p className="star-gallery-empty">등록된 연혁이 없습니다.</p>}</section><section><header><small>HONORS</small><h3>AWARD</h3></header><ul>{star.awards.map((item, index) => <li key={`${item.year}-${item.text}-${index}`}><time>{item.year}</time><span>{item.text}</span></li>)}</ul>{!star.awards.length && <p className="star-gallery-empty">등록된 수상 정보가 없습니다.</p>}</section></div>
@@ -1586,15 +1642,22 @@ function StarMobileOverview({ star }) {
 }
 
 function StarPage({ star, onOpenFan, onClose, user, onLogin }) {
+  const engagement = useArtistEngagement(star, user, onLogin)
   const [correctionOpen, setCorrectionOpen] = useState(false)
   useEffect(() => setCorrectionOpen(false), [star.id])
   const { locale } = useI18n()
   const [tab, setTab] = useState('intro')
   const [fanQuery, setFanQuery] = useState('')
   const [inviteStatus, setInviteStatus] = useState('')
-  const fanProfiles = (star.fans || []).map(fan => [fan.display_name, fan.handle, fan.avatar_url || 'mypage.jpg', Number(fan.heat_percent || 0), Boolean(fan.featured_rank), fan.featured_rank])
+  const [fanRoster, setFanRoster] = useState(() => dedupeArtistFans(star.fans || []))
+  useEffect(() => setFanRoster(dedupeArtistFans(star.fans || [])), [star.id, star.fans])
+  useEffect(() => {
+    if (!engagement.fan) return
+    setFanRoster(current => dedupeArtistFans([...current, engagement.fan]))
+  }, [engagement.fan])
+  const fanProfiles = fanRoster.map(fan => [fan.display_name, fan.handle, fan.avatar_url || 'mypage.jpg', Number(fan.heat_percent || 0), Boolean(fan.featured_rank), fan.featured_rank])
   const visibleFans = fanProfiles.filter(([name, id]) => `${name} ${id}`.toLowerCase().includes(fanQuery.trim().toLowerCase()))
-  const totalFans = Math.max(Number(star.followers) || 0, fanProfiles.length)
+  const totalFans = fanProfiles.length
   const galleryCount = (star.galleryItems || []).filter(isApprovedArtistGalleryItem).length
   const inviteFans = async () => {
     const invite = { title: `${star.name} FAN HEAT`, text: `${star.name} 팬 커뮤니티에 함께해요!`, url: window.location.href }
@@ -1602,6 +1665,14 @@ function StarPage({ star, onOpenFan, onClose, user, onLogin }) {
       if (navigator.share) await navigator.share(invite)
       else { await navigator.clipboard.writeText(`${invite.text} ${invite.url}`); setInviteStatus('초대 링크 복사됨') }
     } catch (error) { if (error.name !== 'AbortError') setInviteStatus('링크를 복사하지 못했습니다') }
+  }
+  const toggleFanRegistration = async () => {
+    const existingProfileId = engagement.fan?.profile_id
+    const result = await engagement.toggleFan()
+    if (result === undefined) return
+    setFanRoster(current => result
+      ? dedupeArtistFans([...current, result])
+      : current.filter(item => item.profile_id !== existingProfileId))
   }
   useEffect(() => { setFanQuery(''); setInviteStatus('') }, [star.id])
   const labels = { ko: ['소개', '앨범', '갤러리'], en: ['About', 'Albums', 'Gallery'], ja: ['紹介', 'アルバム', 'ギャラリー'] }[locale] || ['소개', '앨범', '갤러리']
@@ -1612,9 +1683,9 @@ function StarPage({ star, onOpenFan, onClose, user, onLogin }) {
       <div className="star-mobile-appbar"><button type="button" onClick={onClose} aria-label="아티스트 목록으로 돌아가기"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m15 5-7 7 7 7" /></svg></button><strong>{star.name}</strong></div>
       <div className="star-tab-strip"><nav className="star-tabs" aria-label={`${star.name} 콘텐츠 메뉴`} role="tablist">{tabs.map(([key, label]) => <button type="button" role="tab" key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)} aria-selected={tab === key}>{label}{key === 'albums' && <b aria-label={`앨범 ${(star.albums || []).filter(album => album.active !== false).length}개`}>{(star.albums || []).filter(album => album.active !== false).length}</b>}{key === 'gallery' && <b aria-label={`승인된 갤러리 이미지 ${galleryCount}개`}>{galleryCount}</b>}</button>)}</nav><button type="button" className="star-correction-button" title="아티스트 정보 수정 요청" aria-label="아티스트 정보 수정 요청" disabled={!Number.isInteger(Number(star.id))} onClick={() => user ? setCorrectionOpen(true) : onLogin()}><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m14 5 5 5M4 20l3.5-.8L19 7.7 16.3 5 4.8 16.5 4 20Z" /></svg><span>수정 요청</span></button></div>
     </header>
-    {tab === 'intro' && <><StarMobileOverview star={star} /><article className="star-introduction"><div className="star-bio">{star.bio.map(paragraph => <p key={paragraph}>{paragraph}</p>)}{!star.bio.length && <p className="star-gallery-empty">Supabase에 등록된 소개가 없습니다.</p>}</div><div className="star-records"><section><h3>HISTORY</h3><ul>{star.history.map((item, index) => <li key={`${item.year}-${item.text}-${index}`}><time>{item.year}</time> {item.text}</li>)}</ul>{!star.history.length && <p className="star-gallery-empty">등록된 연혁이 없습니다.</p>}</section><section><h3>AWARD</h3><ul>{star.awards.map((item, index) => <li key={`${item.year}-${item.text}-${index}`}><time>{item.year}</time> {item.text}</li>)}</ul>{!star.awards.length && <p className="star-gallery-empty">등록된 수상 정보가 없습니다.</p>}</section></div></article></>}
+    {tab === 'intro' && <><StarMobileOverview star={star} engagement={engagement} /><article className="star-introduction"><div className="star-bio">{star.bio.map(paragraph => <p key={paragraph}>{paragraph}</p>)}{!star.bio.length && <p className="star-gallery-empty">Supabase에 등록된 소개가 없습니다.</p>}</div><div className="star-records"><section><h3>HISTORY</h3><ul>{star.history.map((item, index) => <li key={`${item.year}-${item.text}-${index}`}><time>{item.year}</time><span>{item.text}</span></li>)}</ul>{!star.history.length && <p className="star-gallery-empty">등록된 연혁이 없습니다.</p>}</section><section><h3>AWARD</h3><ul>{star.awards.map((item, index) => <li key={`${item.year}-${item.text}-${index}`}><time>{item.year}</time><span>{item.text}</span></li>)}</ul>{!star.awards.length && <p className="star-gallery-empty">등록된 수상 정보가 없습니다.</p>}</section></div></article></>}
     {tab === 'albums' && <StarAlbums star={star} />}
-    {tab === 'fans' && <section className="star-fan-board"><header className="star-fan-tools"><label className="star-fan-search"><span aria-hidden="true">⌕</span><input value={fanQuery} onChange={event => setFanQuery(event.target.value)} placeholder="이름 또는 ID로 팬 찾기" aria-label="팬 검색" />{fanQuery && <button type="button" onClick={() => setFanQuery('')} aria-label="팬 검색어 지우기">×</button>}</label><button className="star-fan-invite" type="button" onClick={inviteFans}><span>＋</span> INVITE</button><div className="star-fan-count"><span>TOTAL</span><strong>{totalFans.toLocaleString()}</strong></div>{inviteStatus && <em>{inviteStatus}</em>}</header><div className="star-fan-grid">{visibleFans.map(([name, id, image, activity, highlighted, explicitRank]) => { const index = fanProfiles.findIndex(([, fanId]) => fanId === id); const rank = explicitRank || index + 1; const profile = { name, id, image, activity, artist: star.name }; return <article className={highlighted ? 'top-fan' : ''} key={id}><div className={`fan-profile-ring fan-color-${index % 6}`}>{highlighted && <span className={`fan-crown crown-${Math.min(rank, 3)}`} aria-label={`${rank}위 팬`}><svg viewBox="0 0 44 32" aria-hidden="true"><path d="M4 8.5 13.2 16 22 4l8.8 12L40 8.5l-3.2 18H7.2L4 8.5Z" /><path d="M8 27.5h28" /></svg><b>{rank}</b></span>}<img src={assetSrc(image)} alt={`${name} 프로필`} /></div><div className="fan-account"><span>{id}</span><button type="button" onClick={() => onOpenFan(profile)} aria-label={`${id} 소개 페이지로 이동`} title="팬 홈"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 10 8-6 8 6v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-9Z" /></svg></button></div><div className="fan-activity" aria-label={`HEAT ${activity}%`}><span><b>HEAT</b><em>{activity}%</em></span><i><b style={{ width: `${activity}%` }} /></i></div></article> })}</div>{!visibleFans.length && <div className="star-fan-empty"><strong>찾는 팬이 없습니다.</strong><span>다른 이름이나 ID로 검색해 보세요.</span></div>}</section>}
+    {tab === 'fans' && <section className="star-fan-board"><header className="star-fan-tools"><label className="star-fan-search"><span aria-hidden="true">⌕</span><input value={fanQuery} onChange={event => setFanQuery(event.target.value)} placeholder="이름 또는 ID로 팬 찾기" aria-label="팬 검색" />{fanQuery && <button type="button" onClick={() => setFanQuery('')} aria-label="팬 검색어 지우기">×</button>}</label><button className="star-fan-invite" type="button" onClick={inviteFans}><span>＋</span> INVITE</button><button className={`star-fan-register ${engagement.fan ? 'active' : ''}`} type="button" onClick={toggleFanRegistration} disabled={engagement.busy === 'fan'}>{engagement.busy === 'fan' ? '처리 중…' : engagement.fan ? '팬 등록 해제' : '팬으로 등록'}</button><div className="star-fan-count"><span>TOTAL</span><strong>{totalFans.toLocaleString()}</strong></div>{inviteStatus && <em>{inviteStatus}</em>}{engagement.error && <em className="error" role="alert">{engagement.error}</em>}</header><div className="star-fan-grid">{visibleFans.map(([name, id, image, activity, highlighted, explicitRank]) => { const index = fanProfiles.findIndex(([, fanId]) => fanId === id); const rank = explicitRank || index + 1; const profile = { name, id, image, activity, artist: star.name }; return <article className={highlighted ? 'top-fan' : ''} key={id}><div className={`fan-profile-ring fan-color-${index % 6}`}>{highlighted && <span className={`fan-crown crown-${Math.min(rank, 3)}`} aria-label={`${rank}위 팬`}><svg viewBox="0 0 44 32" aria-hidden="true"><path d="M4 8.5 13.2 16 22 4l8.8 12L40 8.5l-3.2 18H7.2L4 8.5Z" /><path d="M8 27.5h28" /></svg><b>{rank}</b></span>}<img src={assetSrc(image)} alt={`${name} 프로필`} /></div><div className="fan-account"><span>{id}</span><button type="button" onClick={() => onOpenFan(profile)} aria-label={`${id} 소개 페이지로 이동`} title="팬 홈"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m4 10 8-6 8 6v9a1 1 0 0 1-1 1h-5v-6h-4v6H5a1 1 0 0 1-1-1v-9Z" /></svg></button></div><div className="fan-activity" aria-label={`HEAT ${activity}%`}><span><b>HEAT</b><em>{activity}%</em></span><i><b style={{ width: `${activity}%` }} /></i></div></article> })}</div>{!visibleFans.length && <div className="star-fan-empty"><strong>찾는 팬이 없습니다.</strong><span>다른 이름이나 ID로 검색해 보세요.</span></div>}</section>}
     {tab === 'gallery' && <StarGallery star={star} />}
   </section>
 }
@@ -1622,8 +1693,12 @@ function StarPage({ star, onOpenFan, onClose, user, onLogin }) {
 function postListMediaSlides(title, image, data, index) {
   const referenceUrl = data?.reference_url || ''
   const storedImages = Array.isArray(data?.images) ? data.images.filter(Boolean) : []
-  const images = storedImages.length ? storedImages : data?.id ? [] : (postSlides[index] || [image]).filter(Boolean)
-  const imageSlides = images.map(src => ({ type: 'image', src }))
+  const images = storedImages.length ? storedImages : (image ? [image] : [])
+  const youtubeUrl = youtubeEmbedUrl(referenceUrl)
+  // Collected YouTube previews can already contain pillar-box padding inside
+  // the bitmap. Mark them for a tighter square-list crop without affecting
+  // ordinary uploaded photos.
+  const imageSlides = images.map(src => ({ type: 'image', src, fillCrop: Boolean(youtubeUrl) }))
   const xMatch = referenceUrl.match(/(?:x|twitter)\.com\/([^/]+)\/status\/(\d+)/i)
   const xPost = xMatch ? { type: 'x', id: xMatch[2], url: referenceUrl, account: xMatch[1], handle: `@${xMatch[1]}` } : null
   const facebookUrl = /facebook\.com|fb\.watch/i.test(referenceUrl) ? referenceUrl : ''
@@ -1634,7 +1709,6 @@ function postListMediaSlides(title, image, data, index) {
   if (tiktokId) return [{ type: 'tiktok', id: tiktokId, url: tiktokUrl, account: 'IVE.official', handle: '@ive.official' }]
   if (instagramPost) return [{ type: 'instagram', url: referenceUrl, account: 'Instagram', handle: '공개 게시물' }]
   if (xPost) return [xPost, ...imageSlides.slice(0, 4)]
-  const youtubeUrl = youtubeEmbedUrl(referenceUrl)
   return youtubeUrl ? [...imageSlides.slice(0, 5), { type: 'youtube', src: youtubeUrl, url: referenceUrl }] : imageSlides.slice(0, 5)
 }
 
@@ -1659,11 +1733,11 @@ function YouTubeListThumbnail({ item, direction, title }) {
   useEffect(() => { setAttempt(0) }, [item?.url])
   const thumbnail = attempt === 0 ? youtubeThumbnailUrl(item.url) : attempt === 1 ? youtubeThumbnailUrl(item.url, 'mqdefault') : ''
   if (!thumbnail) return <PlatformListPlaceholder item={{ ...item, type: 'youtube' }} direction={direction} />
-  return <div className={`post-youtube-thumbnail ${direction}`}><img src={thumbnail} alt={`${title} YouTube 영상 썸네일`} draggable="false" onError={() => setAttempt(current => current + 1)} /><b>YouTube</b></div>
+  return <div className={`post-youtube-thumbnail ${direction}`}><img src={thumbnail} alt={`${title} YouTube 영상 썸네일`} draggable="false" onError={() => setAttempt(current => current + 1)} /></div>
 }
 
 function PostMediaPreviewSlide({ item, direction, title, index }) {
-  if (item?.type === 'image') return <img key={`${item.src}-${index}`} className={`post-media-current ${direction}`} src={assetSrc(item.src)} alt={`${title} ${index + 1}번째 이미지`} draggable="false" />
+  if (item?.type === 'image') return <img key={`${item.src}-${index}`} className={`post-media-current ${item.fillCrop ? 'fill-crop' : ''} ${direction}`} src={assetSrc(item.src)} alt={`${title} ${index + 1}번째 이미지`} draggable="false" />
   if (item?.type === 'youtube') return <YouTubeListThumbnail item={item} direction={direction} title={title} />
   return <PlatformListPlaceholder item={item} direction={direction} />
 }
@@ -1850,7 +1924,7 @@ function relativePostTime(value) {
   return new Date(timestamp).toLocaleDateString('ko-KR', { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-function Feed({ query, filters, onSelect, items = posts, user, onLogin, onHeatChange }) {
+function Feed({ query, filters, onSelect, items = [], user, onLogin, onHeatChange }) {
   const { t, localizeTitle } = useI18n()
   const [visibleCount, setVisibleCount] = useState(10)
   const sentinel = useRef(null)
@@ -1892,7 +1966,7 @@ function Feed({ query, filters, onSelect, items = posts, user, onLogin, onHeatCh
       <PostThumbnail slides={postListMediaSlides(title, image, data, originalIndex)} title={localizeTitle(title)} />
       <div className="post-copy">{title && <h3>{localizeTitle(title)}</h3>}{data?.summary && <p>{data.summary}</p>}<PostMetadata viewCount={viewCount} giftCount={giftCount} commentCount={commentCount} authorId={authorId} /></div>
       <PostMetadata className="post-mobile-actions" viewCount={viewCount} giftCount={giftCount} commentCount={commentCount} authorId={authorId} />
-      <HeatVote initialCount={data?.vote_count ?? voteCounts[originalIndex] ?? 20} postId={data?.id} user={user} onLogin={onLogin} onCountChange={onHeatChange} />
+      <HeatVote initialCount={data?.vote_count ?? 0} postId={data?.id} user={user} onLogin={onLogin} onCountChange={onHeatChange} />
     </article>})}</div>
     {!shown.length && <div className="empty">{t('empty')}</div>}
     {shown.length > visibleCount && <div className="feed-sentinel" ref={sentinel}><span>포스트를 더 불러오는 중…</span></div>}
@@ -2108,7 +2182,7 @@ function PostDetail({ post, onClose, user, onLogin, onEdit, previousPost, nextPo
   const [dragOffset, setDragOffset] = useState(0)
   const [lightboxIndex, setLightboxIndex] = useState(null)
   const [isScrolling, setIsScrolling] = useState(false)
-  const [heatCount, setHeatCount] = useState(Number(post.data?.vote_count ?? voteCounts[post.index] ?? 28))
+  const [heatCount, setHeatCount] = useState(Number(post.data?.vote_count ?? 0))
   const [heated, setHeated] = useState(false)
   const [bookmarked, setBookmarked] = useState(false)
   const [bookmarkPending, setBookmarkPending] = useState(false)
@@ -2120,8 +2194,6 @@ function PostDetail({ post, onClose, user, onLogin, onEdit, previousPost, nextPo
   const suppressImageClick = useRef(false)
   const scrollHideTimer = useRef(null)
   const detailScrollRoot = useRef(null)
-  const safePostIndex = Number.isInteger(post.index) && post.index >= 0 ? post.index : 0
-  const fallbackImages = postDetailFallbacks[safePostIndex % postDetailFallbacks.length] || (post.image ? [post.image] : [])
   const referenceUrl = post.data?.reference_url || ''
   const referenceXMatch = referenceUrl.match(/(?:x|twitter)\.com\/[^/]+\/status\/(\d+)/i)
   const iveXPost = referenceXMatch ? { id: referenceXMatch[1], url: referenceUrl } : null
@@ -2147,7 +2219,7 @@ function PostDetail({ post, onClose, user, onLogin, onEdit, previousPost, nextPo
     .map(source => safeExternalUrl(source?.url || source?.source_url))
     .filter(Boolean))
   const articleOnlySources = postSources.filter(source => !imageSourceUrls.has(safeExternalUrl(sourceRowUrl(source))))
-  const availableImages = storedImages.length ? storedImages : post.data?.id ? [] : fallbackImages
+  const availableImages = storedImages.length ? storedImages : (post.image ? [post.image] : [])
   const detailImages = hasInlineMedia ? [] : availableImages.slice(0, 5)
   const detailSlides = [
     ...(iveXPost ? [{ type: 'x', id: iveXPost.id, url: iveXPost.url }] : []),
@@ -2191,7 +2263,7 @@ function PostDetail({ post, onClose, user, onLogin, onEdit, previousPost, nextPo
     setYoutubePortrait(youtubePortraitHint)
     return undefined
   }, [referenceUrl, youtubeId, youtubeOrientationKey, youtubePortraitHint])
-  useEffect(() => setHeatCount(Number(post.data?.vote_count ?? voteCounts[post.index] ?? 28)), [post.data?.id, post.data?.vote_count, post.index])
+  useEffect(() => setHeatCount(Number(post.data?.vote_count ?? 0)), [post.data?.id, post.data?.vote_count])
   useEffect(() => () => window.clearTimeout(scrollHideTimer.current), [])
   useEffect(() => {
     let active = true
@@ -2590,6 +2662,7 @@ function WriteEditor({ draft, setDraft, images, setImages, imageFiles, setImageF
 
 function AuthModal({ onClose }) {
   const { locale, setLocale, t } = useI18n()
+  const googlePreparingLabel = { ko: 'Google 로그인 준비 중', en: 'Google login coming soon', ja: 'Googleログイン準備中' }[locale] || 'Google 로그인 준비 중'
   const [mode, setMode] = useState('login')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -2646,7 +2719,7 @@ function AuthModal({ onClose }) {
         </form>
         {message && <p className="auth-message">{message}</p>}
         <div className="auth-divider"><span>{t('or')}</span></div>
-        <button className="social-auth google" type="button" onClick={() => oauth('google')} disabled={pending}><img src={`${A}google-g.svg`} alt="" /> {t('google')}</button>
+        <button className="social-auth google is-preparing" type="button" disabled aria-label={googlePreparingLabel}><img src={`${A}google-g.svg`} alt="" /> {googlePreparingLabel}</button>
         <button className="social-auth kakao" type="button" onClick={() => oauth('kakao')} disabled={pending}><img src={`${A}kakao-talk.svg`} alt="" /> {t('kakao')}</button>
         <p className="auth-switch">{mode === 'login' ? t('noAccount') : t('haveAccount')} <button onClick={() => setMode(current => current === 'login' ? 'signup' : 'login')}>{mode === 'login' ? t('signup') : t('login')}</button></p>
         <p className="auth-terms">{t('terms')}</p>
@@ -2655,7 +2728,7 @@ function AuthModal({ onClose }) {
   </div>
 }
 
-function Player({ songIndex, onSelectSong, onPlayingChange, onClose, items = charts }) {
+function Player({ songIndex, onSelectSong, onPlayingChange, onClose, items = [] }) {
   const audio = useRef(null)
   const [playing, setPlaying] = useState(false)
   const [continuous, setContinuous] = useState(false)
@@ -2788,7 +2861,7 @@ function FanHeatApp() {
   const [selectedFan, setSelectedFan] = useState(null)
   const [user, setUser] = useState(null)
   const [unreadMessageCount, setUnreadMessageCount] = useState(0)
-  const [home, setHome] = useState({ tracks: charts, awards, posts, artists: [], artistRankings: { today: [], week: [], month: [] }, heroSlides: [] })
+  const [home, setHome] = useState({ tracks: [], awards: [], posts: [], artists: [], artistRankings: { today: [], week: [], month: [] }, heroSlides: [] })
   const [dataNotice, setDataNotice] = useState('')
   const [authOpen, setAuthOpen] = useState(false)
   const [writing, setWriting] = useState(false)
@@ -2875,7 +2948,17 @@ function FanHeatApp() {
       else window.scrollTo({ top: 0, behavior: 'smooth' })
     })
   }
-  const openFanPage = profile => { setWriting(false); setSelectedPost(null); setSelectedStar(null); setArtistDirectory(false); setMyPageTab('posts'); setMyPageMobileSection('profile'); setSelectedFan(profile); setMyPage(true) }
+  const openFanPage = profile => {
+    if (!user) { setAuthOpen(true); return }
+    setWriting(false)
+    setSelectedPost(null)
+    setSelectedStar(null)
+    setArtistDirectory(false)
+    setMyPageTab('posts')
+    setMyPageMobileSection('profile')
+    setSelectedFan(profile)
+    setMyPage(true)
+  }
   const logout = async () => { await supabase?.auth.signOut(); goHome() }
   useEffect(() => {
     if (!supabase) { setDataNotice('Supabase 환경 변수를 확인해 주세요.'); return undefined }
@@ -2907,7 +2990,9 @@ function FanHeatApp() {
       if (!mobileQuery.matches || mobileVoteOpen || menuOpen) return
       const currentY = Math.max(0, window.scrollY)
       const delta = currentY - mobileNavLastScrollY.current
-      if (currentY <= 24) setMobileNavVisible(true)
+      const pageBottom = document.documentElement.scrollHeight
+      const reachedBottom = currentY + window.innerHeight >= pageBottom - 24
+      if (currentY <= 24 || reachedBottom) setMobileNavVisible(true)
       else if (delta > 7 && currentY > 88) setMobileNavVisible(false)
       else if (delta < -7) setMobileNavVisible(true)
       if (Math.abs(delta) > 7 || currentY <= 24) mobileNavLastScrollY.current = currentY
@@ -2995,6 +3080,15 @@ function FanHeatApp() {
     setHome(current => ({ ...current, posts: current.posts.map(([title, image, data]) => [title, image, data?.id === postId ? { ...data, vote_count: voteCount } : data]) }))
     setSelectedPost(current => current?.data?.id === postId ? { ...current, data: { ...current.data, vote_count: voteCount } } : current)
   }
+  const openPostDetail = post => {
+    setSelectedPost(post)
+    if (!post?.data?.id) return
+    recordPostView(post.data.id).then(viewCount => {
+      if (!Number.isFinite(viewCount)) return
+      setHome(current => ({ ...current, posts: current.posts.map(([title, image, data]) => [title, image, data?.id === post.data.id ? { ...data, view_count: viewCount } : data]) }))
+      setSelectedPost(current => current?.data?.id === post.data.id ? { ...current, data: { ...current.data, view_count: viewCount } } : current)
+    }).catch(() => {})
+  }
   const bestArtistItems = home.artists.length
     ? home.artists.slice(0, 50).map((artist, index) => [artist.name_ko || artist.name, Number(artist.follower_count || 0).toLocaleString(), artist.image_url || highResolutionFallbacks[index % highResolutionFallbacks.length], artist])
     : home.awards.slice(0, 50)
@@ -3006,11 +3100,11 @@ function FanHeatApp() {
       : selectedPost
       ? <div className="detail-shell"><PostDetail post={selectedPost} onClose={() => setSelectedPost(null)} user={user} onLogin={() => setAuthOpen(true)} onEdit={openPostEditor} previousPost={previousPost} nextPost={nextPost} onNavigate={navigatePost} onHeatChange={updatePostHeat} onOpenAuthor={openFanPage} /></div>
       : selectedStar
-      ? <StarVisual star={selectedStar} onClose={goHome} />
+      ? <StarVisual star={selectedStar} onClose={goHome} user={user} onLogin={() => setAuthOpen(true)} />
       : myPage
       ? <MyPageProfile user={user} profile={selectedFan} tracks={home.tracks} onBack={goHome} />
       : <div className={`left-shell ${chartCollapsed ? 'chart-collapsed' : ''}`} id="chart"><ChartPanel onPlay={setSongIndex} activeSong={songIndex} songPlaying={songPlaying} items={home.tracks} artists={home.artists} collapsed={chartCollapsed} onToggle={() => setChartCollapsed(value => !value)} user={user} onLogin={() => setAuthOpen(true)} /><Hero user={user} onLogin={() => setAuthOpen(true)} slides={home.heroSlides} /></div>}
-    <main className={`content ${writing ? 'writing-content' : ''} ${selectedStar ? 'star-content' : ''} ${myPage ? 'my-content' : ''} ${artistDirectory ? 'artist-directory-content' : ''}`}><SharedHeader {...{query, setQuery, trendingKeywords, menuOpen, setMenuOpen, writing, user, unreadMessageCount, searchFilters, setSearchFilters, filterAuthors}} loggedIn={Boolean(user)} onLogin={() => setAuthOpen(true)} onWrite={openWriter} onHome={goHome} onMyPage={openMyPage} onLogout={logout} />{dataNotice && <div className="data-notice">{dataNotice}</div>}{writing ? <WriteEditor draft={draft} setDraft={setDraft} images={draftImages} setImages={setDraftImages} imageFiles={draftImageFiles} setImageFiles={setDraftImageFiles} inlineImages={draftInlineImages} setInlineImages={setDraftInlineImages} inlineImageFiles={draftInlineImageFiles} setInlineImageFiles={setDraftInlineImageFiles} onClose={closeWriter} onPublish={submitPost} editing={Boolean(editingPost)} /> : selectedStar ? <StarPage star={selectedStar} onOpenFan={openFanPage} onClose={goHome} user={user} onLogin={() => setAuthOpen(true)} /> : myPage ? <MyPageContent user={user} publicProfile={selectedFan} posts={home.posts} followers={home.awards} unreadMessageCount={unreadMessageCount} initialTab={myPageTab} onUnreadChange={setUnreadMessageCount} onOpenFriend={openFanPage} onSelect={post => { setMyPage(false); setSelectedFan(null); setSelectedPost(post) }} /> : artistDirectory ? <ArtistDirectory items={bestArtistItems} query={query} setQuery={setQuery} onClose={() => { setArtistDirectory(false); setQuery('') }} onSelect={star => { recordArtistClick(star.id).catch(() => {}); setArtistDirectory(false); setSelectedPost(null); setSelectedStar(star) }} /> : <><Awards items={bestArtistItems} rankings={home.artistRankings} onViewAll={() => { setQuery(''); setArtistDirectory(true) }} onSelect={star => { setSelectedPost(null); setSelectedStar(star) }} /><Feed query={query} filters={searchFilters} onSelect={setSelectedPost} items={home.posts} user={user} onLogin={() => setAuthOpen(true)} onHeatChange={updatePostHeat} /></>}</main>
+    <main className={`content ${writing ? 'writing-content' : ''} ${selectedStar ? 'star-content' : ''} ${myPage ? 'my-content' : ''} ${artistDirectory ? 'artist-directory-content' : ''}`}><SharedHeader {...{query, setQuery, trendingKeywords, menuOpen, setMenuOpen, writing, user, unreadMessageCount, searchFilters, setSearchFilters, filterAuthors}} loggedIn={Boolean(user)} onLogin={() => setAuthOpen(true)} onWrite={openWriter} onHome={goHome} onMyPage={openMyPage} onLogout={logout} />{dataNotice && <div className="data-notice">{dataNotice}</div>}{writing ? <WriteEditor draft={draft} setDraft={setDraft} images={draftImages} setImages={setDraftImages} imageFiles={draftImageFiles} setImageFiles={setDraftImageFiles} inlineImages={draftInlineImages} setInlineImages={setDraftInlineImages} inlineImageFiles={draftInlineImageFiles} setInlineImageFiles={setDraftInlineImageFiles} onClose={closeWriter} onPublish={submitPost} editing={Boolean(editingPost)} /> : selectedStar ? <StarPage star={selectedStar} onOpenFan={openFanPage} onClose={goHome} user={user} onLogin={() => setAuthOpen(true)} /> : myPage ? <MyPageContent user={user} publicProfile={selectedFan} posts={home.posts} followers={home.awards} unreadMessageCount={unreadMessageCount} initialTab={myPageTab} onUnreadChange={setUnreadMessageCount} onOpenFriend={openFanPage} onSelect={post => { setMyPage(false); setSelectedFan(null); openPostDetail(post) }} /> : artistDirectory ? <ArtistDirectory items={bestArtistItems} query={query} setQuery={setQuery} onClose={() => { setArtistDirectory(false); setQuery('') }} onSelect={star => { recordArtistClick(star.id).catch(() => {}); setArtistDirectory(false); setSelectedPost(null); setSelectedStar(star) }} /> : <><Awards items={bestArtistItems} rankings={home.artistRankings} onViewAll={() => { setQuery(''); setArtistDirectory(true) }} onSelect={star => { setSelectedPost(null); setSelectedStar(star) }} /><Feed query={query} filters={searchFilters} onSelect={openPostDetail} items={home.posts} user={user} onLogin={() => setAuthOpen(true)} onHeatChange={updatePostHeat} /></>}</main>
     {USER_MUSIC_PLAYBACK_ENABLED && !writing && !selectedPost && !myPage && <Player songIndex={songIndex} onSelectSong={setSongIndex} onPlayingChange={setSongPlaying} onClose={() => { setSongPlaying(false); setSongIndex(null) }} items={home.tracks} />}
     {myPage && !selectedFan && <MobileMyPageTabs active={myPageMobileSection} unreadMessageCount={unreadMessageCount} onSelect={selectMyPageMobileSection} onBack={goHome} />}
     {mobileVoteOpen && <MobileVotePage onClose={goHome} onPlay={setSongIndex} activeSong={songIndex} items={home.tracks} artists={home.artists} user={user} onLogin={() => { setMobileVoteOpen(false); setAuthOpen(true) }} />}

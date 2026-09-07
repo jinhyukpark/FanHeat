@@ -18,6 +18,8 @@ cp deploy/frontend.env.example deploy/frontend.env
 
 Supabase URL과 publishable key를 실제 운영 값으로 교체합니다. 이 파일은 Git에서 제외됩니다.
 
+카카오 로그인 자격 증명은 EC2나 `deploy/frontend.env`에 넣지 않습니다. 카카오 REST API 키와 Client Secret은 Supabase Dashboard의 Kakao Auth provider에만 설정하며, 상세 절차는 `web/README.md`를 따릅니다.
+
 도메인 연결 전에는 `SITE_ADDRESS=:80`으로 시작할 수 있습니다. 도메인의 A 레코드를 Elastic IP로 연결한 뒤 `SITE_ADDRESS=example.com`처럼 바꾸고 재배포하면 Caddy가 HTTPS 인증서를 자동 발급합니다.
 
 ## 2. EC2 생성

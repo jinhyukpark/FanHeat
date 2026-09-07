@@ -19,6 +19,20 @@ const optionalAdminHttpUrl = (value, fieldLabel) => {
 
 export const isAdminUser = user => user?.app_metadata?.role === 'admin'
 
+export async function loadAdminCopyrightReports() {
+  return throwIfError(await requireSupabase().from('copyright_reports').select('*').order('created_at', { ascending: false }))
+}
+
+export async function reviewAdminCopyrightReport(id, status, adminNote, reviewerId) {
+  return throwIfError(await requireSupabase().from('copyright_reports').update({
+    status,
+    admin_note: String(adminNote || '').trim(),
+    reviewed_by: reviewerId,
+    reviewed_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  }).eq('id', id).select().single())
+}
+
 const HERO_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp']
 
 const uploadHeroImage = async (client, file, role) => {
@@ -119,7 +133,7 @@ export async function deleteAdminMembers(ids) {
 }
 
 const albumTrackSelect = 'artist_album_tracks(id,album_id,track_number,title,duration_text,lyrics_excerpt,youtube_url,active,display_order,created_at,updated_at)'
-const artistDetailSelect = `id,slug,name,name_ko,image_url,description,active,review_pending,created_at,updated_at,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,tracks(count),award_entries(count),posts(count),artist_correction_requests(id,status),artist_albums(id,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,active,display_order,created_at,updated_at,${albumTrackSelect}),artist_gallery_items(id,title,image_url,source_page_url,original_image_url,source_collected_at,source_provider,creator_name,license_name,license_url,attribution_text,rights_verified_at,captured_on,active,display_order,ai_decision,ai_reason,ai_confidence,ai_category,ai_people_visible,ai_promotional_layout,review_status,reviewed_at,created_at,updated_at),artist_fans(id,profile_id,display_name,handle,avatar_url,heat_percent,featured_rank,active,display_order,created_at,updated_at)`
+const artistDetailSelect = `id,slug,name,name_ko,image_url,description,active,review_pending,created_at,updated_at,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,tracks(count),award_entries(count),posts(count),artist_correction_requests(id,status),artist_profile_images(id,image_url,display_order),artist_albums(id,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,active,display_order,created_at,updated_at,${albumTrackSelect}),artist_gallery_items(id,title,image_url,source_page_url,original_image_url,source_collected_at,source_provider,creator_name,license_name,license_url,attribution_text,rights_verified_at,captured_on,active,display_order,ai_decision,ai_reason,ai_confidence,ai_category,ai_people_visible,ai_promotional_layout,review_status,reviewed_at,created_at,updated_at),artist_fans(id,profile_id,display_name,handle,avatar_url,heat_percent,featured_rank,active,display_order,created_at,updated_at)`
 
 export async function loadAdminArtists() {
   return throwIfError(await requireSupabase().from('artists').select(artistDetailSelect).order('created_at', { ascending: false }).order('id', { ascending: false }))
@@ -143,11 +157,13 @@ export async function deleteAdminArtist(id) {
 }
 
 export async function updateAdminArtist(id, values) {
-  return throwIfError(await requireSupabase().from('artists').update({
+  const client = requireSupabase()
+  const profileImages = [...new Set((values.profile_images || []).map(value => String(value || '').trim()).filter(Boolean))].slice(0, 10)
+  const artist = throwIfError(await client.from('artists').update({
     slug: values.slug.trim(),
     name: values.name.trim(),
     name_ko: values.name_ko.trim() || null,
-    image_url: values.image_url.trim() || null,
+    image_url: profileImages[0] || values.image_url.trim() || null,
     description: values.description.trim() || null,
     real_name: values.real_name?.trim() || null,
     role_description: values.role_description?.trim() || null,
@@ -167,6 +183,27 @@ export async function updateAdminArtist(id, values) {
     active: Boolean(values.active),
     updated_at: new Date().toISOString(),
   }).eq('id', id).select().single())
+  throwIfError(await client.from('artist_profile_images').delete().eq('artist_id', id))
+  if (profileImages.length) throwIfError(await client.from('artist_profile_images').insert(profileImages.map((imageUrl, index) => ({ artist_id: id, image_url: imageUrl, display_order: index }))))
+  return artist
+}
+
+export async function uploadAdminArtistProfileImage(artistId, file) {
+  if (!Number.isSafeInteger(Number(artistId)) || Number(artistId) <= 0) throw new Error('아티스트를 확인할 수 없습니다.')
+  if (!(file instanceof Blob) || file.type !== 'image/webp' || file.size > 5 * 1024 * 1024) throw new Error('잘라낸 WebP 이미지는 5MB 이하여야 합니다.')
+  const client = requireSupabase()
+  const path = `artist-profiles/${artistId}/${crypto.randomUUID()}.webp`
+  const upload = await client.storage.from('fanheat-assets').upload(path, file, {
+    cacheControl: '31536000', contentType: 'image/webp', upsert: false,
+  })
+  if (upload.error) throw upload.error
+  const imageUrl = client.storage.from('fanheat-assets').getPublicUrl(path).data.publicUrl
+  const saved = await client.from('artist_profile_images').upsert({ artist_id: artistId, image_url: imageUrl, display_order: 999 }, { onConflict: 'artist_id,image_url' }).select('image_url').single()
+  if (saved.error) {
+    await client.storage.from('fanheat-assets').remove([path]).catch(() => {})
+    throw saved.error
+  }
+  return saved.data
 }
 
 function gallerySourceUrl(value) {
@@ -292,6 +329,13 @@ export async function updateAdminPost(id, values) {
 export async function updateAdminPostStatus(id, status) {
   if (!['draft', 'published', 'archived'].includes(status)) throw new Error('지원하지 않는 포스트 상태입니다.')
   return throwIfError(await requireSupabase().from('posts').update({ status, updated_at: new Date().toISOString() }).eq('id', id).select().single())
+}
+
+export async function deleteAdminPosts(ids) {
+  const uniqueIds = [...new Set(ids)].filter(Boolean)
+  if (!uniqueIds.length) return []
+  if (uniqueIds.length > 100) throw new Error('포스트는 한 번에 최대 100개까지 삭제할 수 있습니다.')
+  return throwIfError(await requireSupabase().from('posts').delete().in('id', uniqueIds).select('id'))
 }
 
 export async function loadAdminComments() {

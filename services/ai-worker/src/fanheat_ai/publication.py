@@ -216,8 +216,9 @@ class PublicationService:
         return [dict(row) for row in rows]
 
     def run_engagement(self, limit: int = 30) -> EngagementRunResult:
-        cancelled = self._cancel_human_blocked_plans()
+        self._resume_human_comment_plans()
         plans = self._backfill_engagement_plans(limit)
+        self._schedule_human_comment_replies(limit)
         completed, failed = self._process_due_engagement_actions(limit)
         return EngagementRunResult(
             plans_created=plans,
@@ -225,8 +226,84 @@ class PublicationService:
             post_heats_completed=completed["post_heat"],
             comment_likes_completed=completed["comment_like"],
             actions_failed=failed,
-            plans_cancelled_for_human_comments=cancelled,
+            plans_cancelled_for_human_comments=0,
         )
+
+    def cast_daily_ai_votes(self) -> dict:
+        """Cast at most one Seoul-calendar-day vote for every enabled AI profile.
+
+        The assignment is deterministic for a profile and date, but its ordering
+        changes each day. Repeated n8n executions are safe because the table's
+        primary key and ON CONFLICT protect the one-vote-per-day invariant.
+        """
+        with self.engine.begin() as connection:
+            row = connection.execute(
+                text(
+                    """
+                    with vote_day as materialized (
+                      select ((now() at time zone 'Asia/Seoul')::date) as value
+                    ), eligible_profile_ids as materialized (
+                      select distinct persona.profile_id
+                      from public.ai_personas persona
+                      join public.profiles profile
+                        on profile.id = persona.profile_id
+                       and profile.is_ai is true
+                      where persona.enabled is true
+                        and persona.profile_id is not null
+                    ), eligible_profiles as materialized (
+                      select profile_id,
+                             row_number() over (
+                               order by md5(profile_id::text || ':' || vote_day.value::text), profile_id
+                             ) as position
+                      from eligible_profile_ids
+                      cross join vote_day
+                    ), active_artists as materialized (
+                      select artist.id,
+                             row_number() over (
+                               order by md5(artist.id::text || ':' || vote_day.value::text), artist.id
+                             ) as position,
+                             count(*) over () as artist_count
+                      from public.artists artist
+                      cross join vote_day
+                      where artist.active is true
+                    ), missing_profiles as materialized (
+                      select eligible.profile_id, eligible.position
+                      from eligible_profiles eligible
+                      cross join vote_day
+                      where not exists (
+                        select 1
+                        from public.daily_artist_votes existing
+                        where existing.user_id = eligible.profile_id
+                          and existing.vote_date = vote_day.value
+                      )
+                    ), assignments as materialized (
+                      select missing.profile_id, artist.id as artist_id
+                      from missing_profiles missing
+                      join active_artists artist
+                        on artist.position = ((missing.position - 1) % artist.artist_count) + 1
+                    ), inserted as (
+                      insert into public.daily_artist_votes (user_id, artist_id, vote_date)
+                      select assignment.profile_id, assignment.artist_id, vote_day.value
+                      from assignments assignment
+                      cross join vote_day
+                      on conflict (user_id, vote_date) do nothing
+                      returning user_id
+                    )
+                    select vote_day.value::text as vote_date,
+                           (select count(*) from eligible_profiles)::integer as eligible_ai_profiles,
+                           (select count(*) from active_artists)::integer as active_artists,
+                           ((select count(*) from eligible_profiles) -
+                            (select count(*) from missing_profiles))::integer as already_voted,
+                           (select count(*) from inserted)::integer as votes_created,
+                           ((select count(*) from missing_profiles) -
+                            (select count(*) from inserted))::integer as unassigned_profiles
+                    from vote_day
+                    """
+                )
+            ).mappings().first()
+        if row is None:
+            raise RuntimeError("daily AI vote summary was not returned")
+        return dict(row)
 
     def approve(self, draft_id: str, request: ReviewRequest) -> dict:
         next_status = "scheduled" if request.scheduled_at else "approved"
@@ -437,13 +514,6 @@ class PublicationService:
                       and d.published_post_id is not null
                       and not exists (
                         select 1 from ai_engagement_plans p where p.source_draft_id = d.id
-                      )
-                      and not exists (
-                        select 1
-                        from comments c
-                        left join profiles commenter on commenter.id = c.author_id
-                        where c.post_id = po.id and c.deleted_at is null
-                          and coalesce(commenter.is_ai, false) = false
                       )
                     order by d.updated_at
                     limit :limit
@@ -740,13 +810,6 @@ class PublicationService:
                     left join media_metric_snapshots ms
                       on ms.media_item_id = any(d.source_media_item_ids)
                     where d.id = cast(:id as uuid) and d.status = 'published'
-                      and not exists (
-                        select 1
-                        from comments c
-                        left join profiles commenter on commenter.id = c.author_id
-                        where c.post_id = po.id and c.deleted_at is null
-                          and coalesce(commenter.is_ai, false) = false
-                      )
                     group by d.published_post_id, d.title, d.body, d.persona_id
                     """
                 ),
@@ -837,7 +900,6 @@ class PublicationService:
         return 1
 
     def _process_due_engagement_actions(self, limit: int) -> tuple[dict[str, int], int]:
-        self._cancel_human_blocked_plans()
         completed = {"comment": 0, "post_heat": 0, "comment_like": 0}
         failed = 0
         for _ in range(limit):
@@ -845,7 +907,7 @@ class PublicationService:
                 action = connection.execute(
                     text(
                         """
-                        select a.id, a.plan_id, a.action_type, a.persona_id, a.draft_id,
+                        select a.id, a.plan_id, a.action_type, a.persona_id, a.draft_id, a.target_comment_id,
                                a.parent_action_id, p.post_id, p.ends_at,
                                pe.profile_id, pe.display_name, pe.role, pe.tone, pe.system_prompt,
                                parent_action.status as parent_action_status,
@@ -890,55 +952,131 @@ class PublicationService:
             )
         return completed, failed
 
-    def _cancel_human_blocked_plans(self) -> int:
+    def _schedule_human_comment_replies(self, limit: int) -> int:
+        """Attach one AI reply action to each unanswered human comment or reply."""
         with self.engine.begin() as connection:
-            cancelled = connection.execute(
+            candidates = connection.execute(
                 text(
                     """
-                    with blocked as materialized (
-                      select distinct p.id
-                      from ai_engagement_plans p
-                      join comments c on c.post_id = p.post_id and c.deleted_at is null
-                      left join profiles commenter on commenter.id = c.author_id
-                      where p.status = 'active' and coalesce(commenter.is_ai, false) = false
-                    ), skipped as (
+                    select human_comment.id as comment_id, plan.id as plan_id, persona.id as persona_id
+                    from comments human_comment
+                    join profiles human_profile
+                      on human_profile.id = human_comment.author_id and human_profile.is_ai is false
+                    join lateral (
+                      select candidate_plan.id
+                      from ai_engagement_plans candidate_plan
+                      where candidate_plan.post_id = human_comment.post_id
+                        and (
+                          candidate_plan.status in ('active', 'completed')
+                          or candidate_plan.rationale->>'cancel_reason' = 'human_comment_detected'
+                        )
+                      order by candidate_plan.created_at desc
+                      limit 1
+                    ) plan on true
+                    join lateral (
+                      select ai_persona.id
+                      from ai_personas ai_persona
+                      join profiles ai_profile on ai_profile.id = ai_persona.profile_id and ai_profile.is_ai
+                      where ai_persona.enabled and ai_persona.profile_id is not null
+                        and ai_persona.profile_id <> human_comment.author_id
+                      order by ai_persona.last_used_at nulls first, random()
+                      limit 1
+                    ) persona on true
+                    where human_comment.deleted_at is null
+                      and not exists (
+                        select 1 from comments ai_reply
+                        join profiles ai_reply_profile on ai_reply_profile.id = ai_reply.author_id and ai_reply_profile.is_ai
+                        where ai_reply.parent_id = human_comment.id and ai_reply.deleted_at is null
+                      )
+                      and not exists (
+                        select 1 from ai_engagement_actions pending_reply
+                        where pending_reply.target_comment_id = human_comment.id
+                          and pending_reply.status in ('pending', 'processing')
+                      )
+                    order by human_comment.created_at
+                    limit :limit
+                    """
+                ),
+                {"limit": limit},
+            ).mappings().all()
+            for candidate in candidates:
+                connection.execute(
+                    text(
+                        """
+                        insert into ai_engagement_actions (
+                          id, plan_id, persona_id, action_type, target_comment_id, scheduled_at
+                        ) values (
+                          cast(:id as uuid), :plan_id, :persona_id, 'comment', :comment_id, now()
+                        )
+                        """
+                    ),
+                    {"id": str(uuid.uuid4()), **dict(candidate)},
+                )
+                connection.execute(
+                    text(
+                        """
+                        update ai_engagement_plans
+                        set status = 'active', ends_at = greatest(ends_at, now() + interval '6 hours'), updated_at = now()
+                        where id = :plan_id
+                        """
+                    ),
+                    {"plan_id": candidate["plan_id"]},
+                )
+        return len(candidates)
+
+    def _resume_human_comment_plans(self) -> int:
+        with self.engine.begin() as connection:
+            resumed = connection.execute(
+                text(
+                    """
+                    with resumed_plans as materialized (
+                      update ai_engagement_plans
+                      set status = 'active',
+                          rationale = rationale - 'cancel_reason',
+                          ends_at = greatest(ends_at, now() + interval '6 hours'),
+                          updated_at = now()
+                      where status = 'cancelled'
+                        and rationale->>'cancel_reason' = 'human_comment_detected'
+                      returning id
+                    ), resumed_actions as (
                       update ai_engagement_actions a
-                      set status = 'skipped',
-                          error_message = 'human comment detected; AI engagement cancelled',
-                          executed_at = now(), updated_at = now()
-                      where a.plan_id in (select id from blocked)
-                        and a.status in ('pending', 'processing')
+                      set status = 'pending', error_message = null, executed_at = null,
+                          scheduled_at = now(), updated_at = now()
+                      where a.plan_id in (select id from resumed_plans)
+                        and a.status = 'skipped'
+                        and a.error_message = 'human comment detected; AI engagement cancelled'
                       returning a.plan_id
                     )
-                    update ai_engagement_plans p
-                    set status = 'cancelled',
-                        rationale = p.rationale || '{"cancel_reason":"human_comment_detected"}'::jsonb,
-                        updated_at = now()
-                    where p.id in (select id from blocked)
-                    returning p.id
+                    select id from resumed_plans
                     """
                 )
             ).scalars().all()
-        return len(cancelled)
+        return len(resumed)
 
     @staticmethod
-    def _has_human_comment(connection, post_id) -> bool:
-        return bool(
-            connection.execute(
-                text(
-                    """
-                    select exists (
-                      select 1
-                      from comments c
-                      left join profiles commenter on commenter.id = c.author_id
-                      where c.post_id = :post_id and c.deleted_at is null
-                        and coalesce(commenter.is_ai, false) = false
-                    )
-                    """
-                ),
-                {"post_id": post_id},
-            ).scalar_one()
-        )
+    def _human_reply_target(connection, post_id, ai_profile_id) -> dict | None:
+        row = connection.execute(
+            text(
+                """
+                select c.id, c.body, c.author_display_name
+                from comments c
+                left join profiles commenter on commenter.id = c.author_id
+                where c.post_id = :post_id and c.deleted_at is null
+                  and coalesce(commenter.is_ai, false) = false
+                  and c.author_id <> :ai_profile_id
+                  and not exists (
+                    select 1
+                    from comments reply
+                    join profiles reply_author on reply_author.id = reply.author_id and reply_author.is_ai
+                    where reply.parent_id = c.id and reply.deleted_at is null
+                  )
+                order by c.created_at desc
+                limit 1
+                """
+            ),
+            {"post_id": post_id, "ai_profile_id": ai_profile_id},
+        ).mappings().first()
+        return dict(row) if row else None
 
     def _defer_action(self, action_id, scheduled_at: datetime | None = None) -> None:
         with self.engine.begin() as connection:
@@ -1003,7 +1141,20 @@ class PublicationService:
             return True
 
         parent_comment = None
-        if action.get("parent_action_id"):
+        if action.get("target_comment_id"):
+            with self.engine.connect() as connection:
+                parent_comment = connection.execute(
+                    text(
+                        """
+                        select c.id, c.body, c.author_display_name
+                        from comments c
+                        join profiles author_profile on author_profile.id = c.author_id and author_profile.is_ai is false
+                        where c.id = :comment_id and c.post_id = :post_id and c.deleted_at is null
+                        """
+                    ),
+                    {"comment_id": action["target_comment_id"], "post_id": action["post_id"]},
+                ).mappings().first()
+        if parent_comment is None and action.get("parent_action_id"):
             if not action.get("parent_comment_id"):
                 if action.get("parent_action_status") in {"pending", "processing"} and datetime.now(timezone.utc) < action["ends_at"]:
                     self._defer_action(action["id"])
@@ -1021,6 +1172,10 @@ class PublicationService:
                         ),
                         {"comment_id": action["parent_comment_id"], "post_id": action["post_id"]},
                     ).mappings().first()
+
+        if parent_comment is None:
+            with self.engine.connect() as connection:
+                parent_comment = self._human_reply_target(connection, action["post_id"], action["profile_id"])
 
         with self.engine.connect() as connection:
             post = connection.execute(
@@ -1080,24 +1235,6 @@ class PublicationService:
         return self._execute_comment_action(action)
 
     def _execute_engagement_action(self, action: dict) -> bool:
-        with self.engine.begin() as connection:
-            if self._has_human_comment(connection, action["post_id"]):
-                connection.execute(
-                    text(
-                        """
-                        update ai_engagement_actions
-                        set status = 'skipped', error_message = 'human comment detected; AI engagement cancelled',
-                            executed_at = now(), updated_at = now()
-                        where plan_id = :plan_id and status in ('pending', 'processing')
-                        """
-                    ),
-                    {"plan_id": action["plan_id"]},
-                )
-                connection.execute(
-                    text("update ai_engagement_plans set status = 'cancelled', rationale = rationale || '{\"cancel_reason\":\"human_comment_detected\"}'::jsonb, updated_at = now() where id = :id"),
-                    {"id": action["plan_id"]},
-                )
-                return False
         if action["action_type"] == "comment":
             return self._execute_comment_action(action)
 

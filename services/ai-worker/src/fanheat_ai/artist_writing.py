@@ -33,13 +33,16 @@ def write_artist(request, llm, retry=True):
         {'role': 'user', 'content': request.model_dump_json()},
     ]
     messages[0]['content'] += ' For Korean output, use natural Korean sentences with no Japanese kana. Do not transliterate member names from Japanese; omit the member list unless Korean spellings are supplied. Keep history entries to one concise dated milestone, not a biography paragraph.'
+    messages[0]['content'] += ' History and awards must be short bullet labels, preferably 20-60 characters and at most 90 characters per text. One event per entry. Put the year only in year, not repeated in text. Omit artist name, birth details, commentary and promotional explanations. History example: 그룹 데뷔; 솔로 미니 앨범 발매. Awards format: 시상식 · 수상 부문. Never put debut, disbandment, fanclub closure or general activities in awards. Preserve exact evidence in quote, separately from the short display label.'
     if not retry:
-        messages.append({'role':'user','content':'이전 작성 결과는 검증에 실패했습니다. 인명 목록과 그룹명 어원 설명을 전부 생략하세요. 출처에서 확실한 데뷔 날짜, 그룹 규모, 활동 분야만 간결하게 작성하세요. 수상 요청이면 실제 수상 근거 없을 때 entries를 비우세요. 한국어 문장에 일본어 가나 문자를 쓰지 마세요. quote는 원문 그대로, source_url은 제공된 URL 그대로 유지하세요.'})
+        messages.append({'role':'user','content':'이전 작성 결과는 검증에 실패했습니다. 요청된 scope를 유지하세요. 연혁·수상은 항목당 90자 이하의 짧은 구절로 다시 작성하세요. 수상은 시상식·수상 부문이 확인되는 실제 수상만 포함하고 근거가 없으면 entries를 비우세요. 한국어 문장에 일본어 가나 문자를 쓰지 마세요. quote는 원문 그대로, source_url은 제공된 URL 그대로 유지하세요.'})
     output = llm.generate_json(messages, Writing)
     sources = {s.url: ' '.join(s.text.split()) for s in request.sources}
     accepted = []
     for entry in output.entries:
         quote = ' '.join(entry.quote.split())
+        if request.scope != 'biography' and len(entry.text.strip()) > 90:
+            continue
         if request.language.startswith('ko') and re.search(r'[\u3040-\u30ff]', entry.text):
             continue
         if entry.source_url not in sources or quote not in sources[entry.source_url]:

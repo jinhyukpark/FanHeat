@@ -122,7 +122,7 @@ class AdminCollectionRequest(BaseModel):
     queries: list[str] = Field(default_factory=list, max_length=30)
     max_results: int = Field(default=15, ge=1, le=100)
     order: CollectionOrder = CollectionOrder.VIEW_COUNT
-    published_within_hours: int | None = Field(default=24, ge=1, le=24 * 30)
+    published_within_hours: int | None = Field(default=24, ge=1, le=24 * 366)
     published_from: date | None = None
     published_to: date | None = None
     region_code: str = Field(default="KR", pattern=r"^[A-Z]{2}$")
@@ -133,18 +133,25 @@ class AdminCollectionRequest(BaseModel):
     include_trending_idols: bool = True
 
     @model_validator(mode="after")
-    def validate_news_date_range(self) -> "AdminCollectionRequest":
-        if self.source != Source.NEWS:
-            return self
+    def validate_publication_date_range(self) -> "AdminCollectionRequest":
         if (self.published_from is None) != (self.published_to is None):
-            raise ValueError("뉴스 수집 시작일과 종료일을 모두 입력하세요")
+            raise ValueError("수집 시작일과 종료일을 모두 입력하세요")
         if self.published_from and self.published_to and self.published_from > self.published_to:
-            raise ValueError("뉴스 수집 시작일은 종료일보다 늦을 수 없습니다")
+            raise ValueError("수집 시작일은 종료일보다 늦을 수 없습니다")
+        if self.source == Source.TIKTOK:
+            if self.published_within_hours and self.published_within_hours > 24 * 30:
+                raise ValueError("TikTok 수집 기간은 최대 30일입니다")
+            if self.published_from and self.published_to and (self.published_to - self.published_from).days >= 30:
+                raise ValueError("TikTok 사용자 지정 수집 기간은 최대 30일입니다")
         return self
 
 
 class SavedQueriesRequest(BaseModel):
     queries: list[str] = Field(max_length=30)
+
+
+class CancelCollectionRequest(BaseModel):
+    job_ids: list[str] = Field(min_length=1, max_length=30)
 
 
 class AdminPipelineRequest(BaseModel):
@@ -200,7 +207,9 @@ class AdminArtistImportRequest(BaseModel):
     existing_artist_slug: str | None = Field(default=None, pattern=r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
     country_code: str = Field(default="KR", pattern=r"^[A-Z]{2}$")
     language_code: str = Field(default="ko", pattern=r"^[A-Za-z]{2,3}(-[A-Za-z]{2,8})?$")
+    source_search_region: Literal["domestic", "global"] = "domestic"
     official_source_urls: list[HttpUrl] = Field(default_factory=list, max_length=20)
+    official_youtube_url: HttpUrl | None = None
     scopes: list[ArtistImportScope] = Field(min_length=1, max_length=8)
     album_limit: int = Field(default=50, ge=1, le=200)
     gallery_limit: int = Field(default=40, ge=1, le=200)
@@ -224,6 +233,19 @@ class AdminArtistImportRequest(BaseModel):
             if not address.is_global:
                 raise ValueError("private official source IP addresses are not allowed")
         return urls
+
+    @field_validator("official_youtube_url")
+    @classmethod
+    def validate_official_youtube_url(cls, url: HttpUrl | None) -> HttpUrl | None:
+        if url is None:
+            return None
+        hostname = (url.host or "").lower().removeprefix("www.")
+        if url.scheme != "https" or hostname not in {"youtube.com", "m.youtube.com"}:
+            raise ValueError("official YouTube URL must be an HTTPS YouTube channel URL")
+        path = url.path.rstrip("/")
+        if not (path.startswith("/@") or path.startswith("/channel/") or path.startswith("/c/") or path.startswith("/user/")):
+            raise ValueError("official YouTube URL must identify a channel")
+        return url
 
 
 class ArtistImportStatusRequest(BaseModel):
@@ -297,7 +319,9 @@ def artist_import_console(request: Request):
 def _identity_context(request: AdminArtistImportRequest) -> dict:
     return {"artist_name": request.artist_name.strip(), "language_code": request.language_code,
             "country_code": request.country_code, "existing_artist_slug": request.existing_artist_slug,
-            "official_source_urls": [str(u) for u in request.official_source_urls]}
+            "source_search_region": request.source_search_region,
+            "official_source_urls": [str(u) for u in request.official_source_urls],
+            "official_youtube_url": str(request.official_youtube_url) if request.official_youtube_url else None}
 
 
 def _sign_identity(request: AdminArtistImportRequest, candidate: dict) -> str:
@@ -327,28 +351,46 @@ def _confirmed_identity(request: AdminArtistImportRequest) -> dict:
 
 @router.post("/api/artist-imports/candidates", dependencies=[Depends(require_admin)])
 def preview_artist_candidates(request: AdminArtistImportRequest) -> dict:
-    from .artist_import import search_artist_candidates
+    from .artist_import import search_artist_candidates, source_url_allowed_for_region
     if not request.artist_name.strip():
         raise HTTPException(status_code=422, detail="아티스트 이름을 입력해 주세요.")
     try:
-        candidates = search_artist_candidates(request.artist_name.strip(), request.language_code)
+        candidates = search_artist_candidates(
+            request.artist_name.strip(),
+            request.language_code,
+            country_code=request.country_code,
+            search_region=request.source_search_region,
+        )
     except (httpx.HTTPError, ValueError, OSError):
         raise HTTPException(status_code=502, detail="아티스트 후보 검색에 실패했습니다. 잠시 후 다시 시도해 주세요. 수집은 시작되지 않았습니다.")
-    typed_identity_sources = [url for url in request.official_source_urls if url.host != 'commons.wikimedia.org']
+    typed_identity_sources = [
+        url for url in request.official_source_urls
+        if url.host != 'commons.wikimedia.org'
+        and (request.source_search_region != 'domestic' or source_url_allowed_for_region(str(url), request.country_code))
+    ]
     for candidate in candidates:
         candidate['can_collect'] = bool(candidate['official_source_urls'] or typed_identity_sources)
         candidate['confirmation'] = _sign_identity(request, candidate) if candidate['can_collect'] else None
     return {"candidates": candidates, "message": "이름과 설명, 출처를 확인하고 한 명을 선택해 주세요. 검색 후보는 공식 채널 검증 결과와 다릅니다."}
 
 
+@router.get("/api/artist-imports/recommendations", dependencies=[Depends(require_admin)])
+def artist_import_recommendations(refresh: bool = False, db: Session = Depends(get_db)) -> dict:
+    """Return selection hints only; choosing one never starts an import."""
+    return trending_idol_recommendations(db, artist_limit=12, force_refresh=refresh)
+
+
 @router.post("/api/artist-imports", status_code=status.HTTP_202_ACCEPTED, dependencies=[Depends(require_admin)])
 def start_artist_import(request: AdminArtistImportRequest, db: Session = Depends(get_db)) -> dict:
+    from .artist_import import source_url_allowed_for_region
     candidate = _confirmed_identity(request)
     payload = request.model_dump(mode="json")
     payload.pop('identity_confirmation', None)
-    payload['candidate'] = {k: candidate.get(k) for k in ('id','label','english_name','description','entity_url','commons_source_url')}
+    payload['candidate'] = {k: candidate.get(k) for k in ('id','label','english_name','description','entity_url','commons_source_url','profile_facts')}
     payload['identity_confirmed_at'] = datetime.now(timezone.utc).isoformat()
-    source_urls = list(dict.fromkeys([*payload["official_source_urls"], *candidate.get('official_source_urls', [])]))
+    source_urls = list(dict.fromkeys([*payload["official_source_urls"], *([payload["official_youtube_url"]] if payload.get("official_youtube_url") else []), *candidate.get('official_source_urls', [])]))
+    if request.source_search_region == 'domestic':
+        source_urls = [url for url in source_urls if source_url_allowed_for_region(str(url), request.country_code)]
     commons_url = candidate.get('commons_source_url')
     if commons_url and commons_url not in source_urls:
         source_urls = [*source_urls[:19], commons_url]
@@ -433,7 +475,26 @@ def _artist_job_cursor(job: CollectionJob) -> dict:
         return {"stage": job.cursor}
 
 
-def _artist_job_payload(job: CollectionJob) -> dict:
+def _artist_persisted_counts(db: Session | None, artist_id: int | None) -> dict[str, int]:
+    empty = {key: 0 for key in ('profile', 'socials', 'biography', 'history', 'awards', 'albums', 'tracks', 'gallery')}
+    if db is None or not artist_id or db.get_bind().dialect.name != 'postgresql':
+        return empty
+    row = db.execute(text("""
+        select
+          num_nonnulls(a.real_name, a.role_description, a.debut_text, a.agency, a.fandom_name, a.description, a.image_url, a.hero_image_url) as profile,
+          num_nonnulls(a.facebook_url, a.x_url, a.instagram_url) as socials,
+          coalesce(cardinality(a.bio_paragraphs), 0) as biography,
+          coalesce(jsonb_array_length(a.history_items), 0) as history,
+          coalesce(jsonb_array_length(a.award_items), 0) as awards,
+          (select count(*) from public.artist_albums album where album.artist_id = a.id) as albums,
+          (select count(*) from public.artist_album_tracks track join public.artist_albums album on album.id = track.album_id where album.artist_id = a.id) as tracks,
+          (select count(*) from public.artist_gallery_items gallery where gallery.artist_id = a.id) as gallery
+        from public.artists a where a.id = :artist_id
+    """), {'artist_id': artist_id}).mappings().first()
+    return empty if row is None else {key: int(row.get(key) or 0) for key in empty}
+
+
+def _artist_job_payload(job: CollectionJob, db: Session | None = None) -> dict:
     from .artist_report import completion_issues
     cursor = _artist_job_cursor(job)
     issues = completion_issues(cursor.get('report'))
@@ -441,6 +502,9 @@ def _artist_job_payload(job: CollectionJob) -> dict:
     for issue in issues:
         logs.append({'at': job.completed_at or job.updated_at, 'level': 'warning',
                      'message': f"보완사항 상세 · {issue['title']} | 설명: {issue['detail']} | 조치: {issue['action']}"})
+    artist_id = cursor.get("artist_id")
+    persisted_counts = _artist_persisted_counts(db, artist_id)
+    stored_total = sum(persisted_counts.values())
     return {
         "job_id": str(job.id),
         "artist_name": job.query,
@@ -448,13 +512,16 @@ def _artist_job_payload(job: CollectionJob) -> dict:
         "stage": cursor.get("stage"),
         "progress": cursor.get("progress", 0),
         "request": cursor.get("request"),
-        "artist_id": cursor.get("artist_id"),
+        "artist_id": artist_id,
         "artist_slug": cursor.get("artist_slug"),
         "import_kind": cursor.get("import_kind", "initial"),
         "logs": logs,
         "completion_issues": issues,
         "report": cursor.get("report"),
-        "collected": job.collected_count,
+        "collected": max(int(job.collected_count or 0), stored_total),
+        "run_collected": int(job.collected_count or 0),
+        "persisted_counts": persisted_counts,
+        "stored_total": stored_total,
         "error": job.error_message,
         "created_at": job.created_at,
         "updated_at": job.updated_at,
@@ -484,6 +551,7 @@ def artist_import_jobs(limit: int = 30, db: Session = Depends(get_db)) -> list[d
         if rule.artist_id is not None
     }
     result = []
+    included_artist_ids: set[int] = set()
     for key, completed_job in completed_by_name.items():
         latest_job = latest_by_name[key]
         completed_cursor = _artist_job_cursor(completed_job)
@@ -491,7 +559,7 @@ def artist_import_jobs(limit: int = 30, db: Session = Depends(get_db)) -> list[d
         artist_id = latest_cursor.get("artist_id") or completed_cursor.get("artist_id")
         artist_slug = latest_cursor.get("artist_slug") or completed_cursor.get("artist_slug")
         rule = rules.get(artist_id)
-        item = _artist_job_payload(latest_job)
+        item = _artist_job_payload(latest_job, db)
         item.update(
             {
                 "artist_id": artist_id,
@@ -503,9 +571,44 @@ def artist_import_jobs(limit: int = 30, db: Session = Depends(get_db)) -> list[d
             }
         )
         result.append(item)
-        if len(result) >= min(max(limit, 1), 100):
-            break
-    return result
+        if artist_id is not None:
+            included_artist_ids.add(int(artist_id))
+
+    stored_artists = db.execute(text("""
+        select id, slug, name, name_ko, active, review_pending, updated_at,
+               facebook_url, x_url, instagram_url
+        from public.artists
+        order by updated_at desc nulls last, id desc
+    """)).mappings().all()
+    for artist in stored_artists:
+        artist_id = int(artist["id"])
+        if artist_id in included_artist_ids:
+            continue
+        persisted_counts = _artist_persisted_counts(db, artist_id)
+        rule = rules.get(artist_id)
+        result.append({
+            "job_id": f"artist-{artist_id}",
+            "artist_name": artist["name_ko"] or artist["name"],
+            "status": "completed",
+            "stage": "관리자 저장 데이터 · 수집 설정 가능",
+            "progress": 100,
+            "artist_id": artist_id,
+            "artist_slug": artist["slug"],
+            "import_kind": "stored",
+            "collected": sum(persisted_counts.values()),
+            "run_collected": 0,
+            "persisted_counts": persisted_counts,
+            "stored_total": sum(persisted_counts.values()),
+            "report": {"quality": "complete", "publication": "published"} if artist["active"] and not artist["review_pending"] else {"quality": "partial", "publication": "review_pending"},
+            "created_at": artist["updated_at"],
+            "updated_at": artist["updated_at"],
+            "last_completed_at": None,
+            "refresh_enabled": bool(rule and rule.enabled),
+            "refresh_interval_seconds": rule.interval_seconds if rule else 0,
+            "next_refresh_at": rule.next_collect_at if rule and rule.enabled else None,
+        })
+    result.sort(key=lambda item: item.get("updated_at") or item.get("completed_at") or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
+    return result[:min(max(limit, 1), 100)]
 
 
 @router.get("/api/artist-imports/activity", dependencies=[Depends(require_admin)])
@@ -516,15 +619,55 @@ def artist_import_activity(limit: int = 30, db: Session = Depends(get_db)) -> li
         .order_by(CollectionJob.created_at.desc())
         .limit(min(max(limit, 1), 100))
     ).all()
-    return [_artist_job_payload(job) for job in jobs]
+    return [_artist_job_payload(job, db) for job in jobs]
 
 
 @router.get("/api/artist-imports/{job_id}", dependencies=[Depends(require_admin)])
 def artist_import_job(job_id: str, db: Session = Depends(get_db)) -> dict:
+    if job_id.startswith("artist-") and job_id.removeprefix("artist-").isdigit():
+        artist_id = int(job_id.removeprefix("artist-"))
+        artist = db.execute(text("""
+            select id, slug, name, name_ko, active, review_pending, updated_at,
+                   facebook_url, x_url, instagram_url
+            from public.artists where id = :artist_id
+        """), {"artist_id": artist_id}).mappings().first()
+        if artist is None:
+            raise HTTPException(status_code=404, detail="저장된 아티스트를 찾을 수 없습니다.")
+        sources = list(dict.fromkeys(filter(None, [artist["facebook_url"], artist["x_url"], artist["instagram_url"]])))
+        persisted_counts = _artist_persisted_counts(db, artist_id)
+        return {
+            "job_id": job_id,
+            "artist_name": artist["name_ko"] or artist["name"],
+            "status": "completed",
+            "stage": "관리자 저장 데이터 · 재수집 준비",
+            "progress": 100,
+            "artist_id": artist_id,
+            "artist_slug": artist["slug"],
+            "import_kind": "stored",
+            "collected": sum(persisted_counts.values()),
+            "persisted_counts": persisted_counts,
+            "stored_total": sum(persisted_counts.values()),
+            "report": None,
+            "updated_at": artist["updated_at"],
+            "settings": {
+                "artist_name": artist["name_ko"] or artist["name"],
+                "existing_artist_slug": artist["slug"],
+                "country_code": "KR",
+                "language_code": "ko",
+                "source_search_region": "domestic",
+                "official_source_urls": sources,
+                "official_youtube_url": None,
+                "scopes": ["profile", "socials", "biography", "history", "awards", "albums", "tracks", "gallery"],
+                "album_limit": 50,
+                "gallery_limit": 40,
+                "storage_bucket": "fanheat-assets",
+                "review_before_publish": True,
+            },
+        }
     job = db.scalar(select(CollectionJob).where(CollectionJob.id == job_id, CollectionJob.source == "artist"))
     if job is None:
         raise HTTPException(status_code=404, detail="아티스트 정보 수집 작업을 찾을 수 없습니다.")
-    result = _artist_job_payload(job)
+    result = _artist_job_payload(job, db)
     cursor = _artist_job_cursor(job)
     result['settings'] = dict(cursor.get('request') or {})
     result['settings'].pop('identity_confirmation', None)
@@ -633,7 +776,7 @@ def cancel_artist_import(job_id: str, db: Session = Depends(get_db)) -> dict:
     job.completed_at = datetime.now(timezone.utc)
     job.cursor = json.dumps(cursor | {"stage": "관리자 확인으로 수집 중지", "progress": 0, "logs": logs}, ensure_ascii=False)
     db.commit()
-    return _artist_job_payload(job)
+    return _artist_job_payload(job, db)
 
 
 @router.post("/api/artist-refreshes/due")
@@ -697,7 +840,7 @@ def update_artist_import_status(
         except (TypeError, ValueError):
             pass
     if job.status == "cancelled":
-        return _artist_job_payload(job)
+        return _artist_job_payload(job, db)
     log_entries = list(existing.get("logs") or [])
     for message in request.logs:
         log_entries.append(
@@ -764,7 +907,7 @@ def update_artist_import_status(
         if rule.enabled:
             rule.next_collect_at = datetime.now(timezone.utc) + timedelta(seconds=rule.interval_seconds)
     db.commit()
-    return _artist_job_payload(job)
+    return _artist_job_payload(job, db)
 
 
 @router.get("/api/n8n/status", dependencies=[Depends(require_admin)])
@@ -840,7 +983,10 @@ def start_collection(request: AdminCollectionRequest, db: Session = Depends(get_
             language_filter_mode=request.language_filter_mode,
             news_sources=request.news_sources if request.source == Source.NEWS else [],
         )
-        collect_media.delay(collection_request.model_dump(mode="json"), job.id)
+        collect_media.apply_async(
+            args=[collection_request.model_dump(mode="json"), job.id],
+            task_id=str(job.id),
+        )
     return {
         "job_ids": [job.id for job in jobs],
         "status": "pending",
@@ -875,6 +1021,9 @@ def collector_settings(db: Session = Depends(get_db)) -> dict:
 @router.get("/api/source-capabilities", dependencies=[Depends(require_admin)])
 def source_capabilities(db: Session = Depends(get_db)) -> dict:
     settings = get_settings()
+    tiktok_configured = bool(
+        settings.naver_client_id and settings.naver_client_secret
+    )
     locale = db.get(CollectorSettings, True)
     saved_news_sources = locale.news_sources if locale and isinstance(locale.news_sources, list) else []
     has_publisher_pages = any(
@@ -893,6 +1042,15 @@ def source_capabilities(db: Session = Depends(get_db)) -> dict:
         news_provider = "none"
     return {
         "youtube": {"configured": bool(settings.youtube_api_key)},
+        "tiktok": {
+            "configured": tiktok_configured,
+            "required_setting": "NAVER_CLIENT_ID/SECRET",
+            "notice": (
+                "네이버 웹검색에서 공개 TikTok 링크를 찾습니다. 날짜는 발견 시각이며 게시일·조회수·국가 필터는 적용되지 않습니다. 임베드 조회 성공이 재생을 보장하지는 않습니다."
+                if tiktok_configured
+                else "네이버 웹문서 검색 권한과 NAVER_CLIENT_ID/SECRET이 필요합니다."
+            ),
+        },
         "x": {"configured": True, "required_setting": "n8n Google Drive OAuth2"},
         "news": {
             "configured": news_provider != "none",
@@ -910,14 +1068,19 @@ def source_capabilities(db: Session = Depends(get_db)) -> dict:
 
 def require_source_configuration(source: Source) -> None:
     settings = get_settings()
+    tiktok_configured = bool(
+        settings.naver_client_id and settings.naver_client_secret
+    )
     configured = {
         Source.YOUTUBE: bool(settings.youtube_api_key),
+        Source.TIKTOK: tiktok_configured,
         Source.X: bool(settings.x_bearer_token),
         Source.NEWS: bool(settings.news_api_key or settings.rss_feeds or (settings.naver_client_id and settings.naver_client_secret)),
     }[source]
     if not configured:
         required = {
             Source.YOUTUBE: "YOUTUBE_API_KEY",
+            Source.TIKTOK: "NAVER_CLIENT_ID/SECRET (웹문서 검색 권한 필요)",
             Source.X: "X_BEARER_TOKEN",
             Source.NEWS: "NAVER_CLIENT_ID/SECRET, NEWS_API_KEY 또는 NEWS_RSS_FEEDS",
         }[source]
@@ -1276,6 +1439,35 @@ def collection_status(job_id: str, db: Session = Depends(get_db)) -> dict:
     return job_payload(job)
 
 
+@router.post("/api/collections/cancel", dependencies=[Depends(require_admin)])
+def cancel_collections(request: CancelCollectionRequest, db: Session = Depends(get_db)) -> dict:
+    jobs = db.scalars(select(CollectionJob).where(CollectionJob.id.in_(request.job_ids))).all()
+    found = {str(job.id): job for job in jobs}
+    cancelled = []
+    already_finished = []
+    now = datetime.now(timezone.utc)
+    for job_id in request.job_ids:
+        job = found.get(str(job_id))
+        if job is None:
+            continue
+        if job.status not in {"pending", "running"}:
+            already_finished.append(str(job.id))
+            continue
+        job.status = "cancelled"
+        job.completed_at = now
+        job.error_message = "관리자가 수집을 종료했습니다."
+        cancelled.append(str(job.id))
+    db.commit()
+    for job_id in cancelled:
+        collect_media.app.control.revoke(job_id, terminate=True, signal="SIGTERM")
+    return {
+        "cancelled_job_ids": cancelled,
+        "already_finished_job_ids": already_finished,
+        "not_found_job_ids": [job_id for job_id in request.job_ids if str(job_id) not in found],
+        "message": f"수집 작업 {len(cancelled)}개에 종료를 요청했습니다.",
+    }
+
+
 def job_payload(job: CollectionJob) -> dict:
     return {
         "job_id": job.id,
@@ -1304,11 +1496,11 @@ def normalize_queries(queries: list[str]) -> list[str]:
 def collection_window(request: AdminCollectionRequest) -> tuple[datetime | None, datetime | None]:
     """Return a UTC half-open publication window for one collection request.
 
-    News dates are entered as inclusive Korean calendar dates. Internally the
+    Custom dates are entered as inclusive Korean calendar dates. Internally the
     end is the next midnight so articles published at any time on the selected
     end date are included.
     """
-    if request.source == Source.NEWS and request.published_from and request.published_to:
+    if request.published_from and request.published_to:
         korean_time = ZoneInfo("Asia/Seoul")
         published_after = datetime.combine(request.published_from, datetime_time.min, korean_time)
         published_before = datetime.combine(request.published_to + timedelta(days=1), datetime_time.min, korean_time)
@@ -1329,7 +1521,7 @@ def command_preview(request: AdminCollectionRequest, queries: list[str]) -> str:
         if request.source == Source.NEWS:
             body["news_sources"] = [source.model_dump(mode="json") for source in request.news_sources]
         published_after, published_before = collection_window(request)
-        if request.source == Source.NEWS and request.published_from and request.published_to:
+        if request.published_from and request.published_to:
             body["published_after"] = published_after.isoformat()
             body["published_before"] = published_before.isoformat()
         elif request.published_within_hours is not None:
@@ -1447,7 +1639,7 @@ ARTIST_IMPORT_HTML = """<!doctype html>
 </style></head><body><main class="page">
 <header class="topbar"><span class="brand-mark">F</span><div class="brand"><h1>FANHEAT Collector Studio</h1><p>아티스트 데이터 자동화 워크벤치</p></div><div class="top-actions"><a id="n8n-status" class="n8n-badge" href="http://localhost:5678/" target="_blank" rel="noopener noreferrer">● n8n 확인 중</a><a href="/admin">수집 화면으로</a><form method="post" action="/admin/logout"><button type="submit">로그아웃</button></form></div></header>
 <div class="content"><form id="artist-import-form" class="layout" novalidate><section class="left-pane"><div class="pane-tabbar"><span class="pane-tab">수집 편집기</span><span class="pane-tab-meta">ARTIST IMPORT</span></div><section class="hero"><div><div class="eyebrow">ARTIST AUTOMATION</div><div class="hero-title-row"><h2>아티스트 정보 가져오기</h2><div class="hero-run-wrap"><button id="run-import-top" class="hero-run" type="button">수집 실행</button><span id="run-status" class="hero-run-status" role="status">실행할 아티스트를 입력하세요.</span></div></div><p>공식 채널을 기준으로 프로필부터 앨범·곡·갤러리까지 한 번에 수집합니다. 실행 요청은 서버에서 n8n으로 전달되며, 가져온 데이터는 관리자 검토 후 공개하는 흐름을 기본으로 합니다.</p></div><div class="hero-note"><strong>공식 출처 우선</strong><br>입력한 공식 홈페이지·SNS·YouTube 채널을 가장 먼저 확인하고, 이미지 원본과 출처 URL을 함께 보존하도록 요청합니다.</div></section>
-<section class="panel settings-panel"><h3>수집 설정</h3><p class="panel-lead">대상 아티스트와 공식 출처를 입력하세요.</p><h4 class="section-title"><span class="step">1</span>아티스트 식별</h4><div class="grid"><div class="field"><label for="artist-name">아티스트 이름 *</label><input id="artist-name" maxlength="120" placeholder="예: 아이유, IU" required></div><div class="field"><label for="artist-slug">기존 아티스트 slug</label><input id="artist-slug" maxlength="120" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="예: iu · 신규면 비워두기"></div><div class="field"><label for="artist-country">기준 국가</label><select id="artist-country"><option value="KR">한국</option><option value="JP">일본</option><option value="US">미국</option><option value="GB">영국</option></select></div><div class="field"><label for="artist-language">결과 언어</label><select id="artist-language"><option value="ko">한국어</option><option value="en">영어</option><option value="ja">일본어</option></select></div><div class="field wide source-field"><div class="field-label-actions"><label for="official-sources">공식 채널 및 검증 출처 URL</label><button id="discover-artist-sources" type="button">AI가 찾아보기</button></div><textarea id="official-sources" placeholder="공식 홈페이지, YouTube, X, Instagram, TikTok, Facebook URL을 한 줄에 하나씩 입력"></textarea><div class="source-field-help"><small>공식 홈페이지와 SNS 후보를 확인해 추가합니다. 최대 20개.</small><small id="source-discovery-status" role="status">Wikimedia Commons는 이미지 검증 출처로 항상 포함됩니다.</small></div></div></div>
+<section class="panel settings-panel"><h3>수집 설정</h3><p class="panel-lead">대상 아티스트와 공식 출처를 입력하세요.</p><h4 class="section-title"><span class="step">1</span>아티스트 식별</h4><div class="grid"><div class="field"><label for="artist-name">아티스트 이름 *</label><input id="artist-name" maxlength="120" placeholder="예: 아이유, IU" required></div><div class="field"><label for="artist-slug">기존 아티스트 slug</label><input id="artist-slug" maxlength="120" pattern="[a-z0-9]+(?:-[a-z0-9]+)*" placeholder="예: iu · 신규면 비워두기"></div><div class="field"><label for="artist-country">기준 국가</label><select id="artist-country"><option value="KR">한국</option><option value="JP">일본</option><option value="US">미국</option><option value="GB">영국</option></select></div><div class="field"><label for="artist-language">결과 언어</label><select id="artist-language"><option value="ko">한국어</option><option value="en">영어</option><option value="ja">일본어</option></select></div><div class="field wide"><label for="source-search-region">API 찾아보기 검색 범위</label><select id="source-search-region"><option value="domestic">기준 국가 중심</option><option value="global">해외 포함</option></select><small>기준 국가 중심은 해당 국가 후보를 우선 표시하고, 해외 포함은 한국어·영어·일본어 API 결과를 함께 검색합니다.</small></div><div class="field wide"><label for="official-youtube-url">공식 YouTube 채널 URL</label><input id="official-youtube-url" type="url" placeholder="https://www.youtube.com/@official 또는 /channel/UC..."><small>이 채널의 업로드와 채널 내 검색을 발표곡·공식 영상 연결의 우선 기준으로 사용합니다.</small></div><div class="field wide source-field"><div class="field-label-actions"><label for="official-sources">기타 공식 채널 및 검증 출처 URL</label><button id="discover-artist-sources" type="button">API 찾아보기</button></div><textarea id="official-sources" placeholder="공식 홈페이지, X, Instagram, TikTok, Facebook URL을 한 줄에 하나씩 입력"></textarea><div class="source-field-help"><small>공식 홈페이지와 SNS 후보를 확인해 추가합니다. 최대 20개.</small><small id="source-discovery-status" role="status">Wikimedia Commons는 이미지 검증 출처로 항상 포함됩니다.</small></div></div></div>
 <h4 class="section-title"><span class="step">2</span>저장 설정</h4><div class="grid"><div class="field"><label for="album-limit">앨범 최대 개수</label><input id="album-limit" type="number" min="1" max="200" value="50"></div><div class="field"><label for="gallery-limit">갤러리 최대 개수</label><input id="gallery-limit" type="number" min="1" max="200" value="40"></div><div class="field"><label for="storage-bucket">이미지 저장 버킷</label><input id="storage-bucket" value="fanheat-assets" pattern="[a-z0-9][a-z0-9-]{1,62}"></div><div class="field"><label for="review-mode">반영 방식</label><select id="review-mode"><option value="review">관리자 검토 후 공개</option><option value="direct">수집 완료 즉시 반영</option></select></div></div></section>
 <section class="panel scope-panel"><h3>가져올 콘텐츠</h3><p class="panel-lead">필요한 범위를 골라 n8n 작업에 전달합니다.</p><div class="scope-grid">
 <label class="scope"><input type="checkbox" name="scope" value="profile" checked><strong>프로필</strong><span>이름·프로필·배너·데뷔·소속사·팬덤</span></label>
@@ -1471,6 +1663,14 @@ function renderJobs(){const query=$('job-search').value.trim().toLocaleLowerCase
 async function loadJobs(){try{artistJobs=await api('/admin/api/artist-imports?limit=100');renderJobs()}catch(error){$('jobs').innerHTML=`<p class="empty">${esc(error.message)}</p>`}}
 function renderActivity(){const picker=$('log-job'),selected=activeLogJob||picker.value||String(activityJobs[0]?.job_id||'');picker.innerHTML=activityJobs.map(job=>`<option value="${esc(job.job_id)}" ${String(job.job_id)===selected?'selected':''}>${esc(job.artist_name)} · ${esc(stateLabels[job.status]||job.status)} · ${esc(itemTime(job.created_at))}</option>`).join('')||'<option value="">수집 작업 없음</option>';const current=activityJobs.find(job=>String(job.job_id)===(picker.value||selected))||activityJobs[0];if(!current){$('activity-log-body').innerHTML='<p class="log-empty">수집 실행 후 진행 로그가 여기에 표시됩니다.</p>';return}const entries=Array.isArray(current.logs)?current.logs:[];$('activity-log-body').innerHTML=entries.length?entries.map(entry=>{const item=typeof entry==='string'?{message:entry,level:'info'}:entry,time=itemTime(item.at||current.updated_at);return `<div class="log-line ${esc(item.level||'info')}"><time>${esc(time)}</time><b>${esc((item.level||'info').toUpperCase())}</b><span>${esc(item.message||'')}</span></div>`}).join(''):`<div class="log-line"><time>${esc(itemTime(current.updated_at||current.created_at))}</time><b>INFO</b><span>${esc(current.stage||'n8n 실행 대기')}</span></div>`;activeLogJob='';const logBody=$('activity-log-body');logBody.scrollTop=logBody.scrollHeight}
 function itemTime(value){return value?new Date(value).toLocaleString('ko-KR'):'시각 없음'}
+const artistTrendStyle=document.createElement('style');artistTrendStyle.textContent='.artist-trends{margin:0 0 22px;padding:16px;border:1px solid #45405f;border-radius:12px;background:linear-gradient(135deg,#19182a,#12151c)}.artist-trends[hidden]{display:none}.artist-trends-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px}.artist-trends-head h4{margin:0;font-size:16px}.artist-trends-head p{margin:3px 0 0;color:var(--muted);font-size:13px}.artist-trends-head button{flex:0 0 auto;min-height:44px;padding:9px 14px;border:1px solid #7867d8;background:#2b2445;color:#e1dcff;font-size:14px}.artist-trend-list{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:13px}.artist-trend-card{min-width:0;min-height:74px;padding:10px 12px;border:1px solid #3d4454;background:#12151c;color:var(--text);text-align:left}.artist-trend-card:hover,.artist-trend-card:focus-visible{border-color:#9a88ff;background:#29233d;outline:0}.artist-trend-card strong,.artist-trend-card span,.artist-trend-card small{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.artist-trend-card strong{font-size:14px}.artist-trend-card span{margin-top:3px;color:#c8beff;font-size:12px}.artist-trend-card small{margin-top:2px;color:var(--muted);font-size:12px}.artist-trend-status{min-height:20px;margin:10px 0 0;color:#b9b1d7;font-size:12px}.artist-trend-status.error{color:#ff91a8}.artist-trend-empty{grid-column:1/-1;margin:0;color:var(--muted);font-size:13px}@media(max-width:1100px){.artist-trend-list{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:700px){.artist-trends-head{align-items:stretch;flex-direction:column}.artist-trend-list{grid-template-columns:repeat(2,minmax(0,1fr))}.artist-trends-head button{width:100%}}@media(max-width:420px){.artist-trend-list{grid-template-columns:1fr}}';document.head.appendChild(artistTrendStyle);
+const artistTrendsSection=document.createElement('section');artistTrendsSection.id='artist-trends';artistTrendsSection.className='artist-trends';artistTrendsSection.setAttribute('aria-labelledby','artist-trends-title');artistTrendsSection.innerHTML='<div class="artist-trends-head"><div><h4 id="artist-trends-title">네이버 트렌드 아티스트</h4><p>최근 네이버 뉴스와 30일 검색 추이를 비교한 후보입니다. 선택하면 아래 이름에 입력됩니다.</p></div><button id="refresh-artist-trends" type="button">최신 정보 새로고침</button></div><div id="artist-trend-list" class="artist-trend-list" aria-live="polite"><p class="artist-trend-empty">트렌드 아티스트를 불러오는 중입니다.</p></div><p id="artist-trend-status" class="artist-trend-status" role="status">후보 선택만으로 수집은 시작되지 않습니다.</p>';
+document.querySelector('.settings-panel .section-title').before(artistTrendsSection);
+let artistRecommendations=[];
+function renderArtistRecommendations(data){artistRecommendations=Array.isArray(data.artists)?data.artists:[];const list=$('artist-trend-list'),trendState=data.naver_trend?.status,discoveryState=data.naver_discovery?.status;list.innerHTML=artistRecommendations.length?artistRecommendations.map((artist,index)=>{const score=artist.naver_trend_score==null?'네이버 검색 자료 없음':`네이버 지수 ${Number(artist.naver_trend_score).toFixed(1)}`,momentum=artist.naver_momentum==null?'':Number(artist.naver_momentum)>=1.05?` · 최근 상승 ${Math.round((Number(artist.naver_momentum)-1)*100)}%`:Number(artist.naver_momentum)<=.95?` · 최근 하락 ${Math.round((1-Number(artist.naver_momentum))*100)}%`:' · 최근 보합',origin=artist.discovered_from==='naver_news'?'네이버 최신 뉴스 발견':artist.naver_news_discovered?'FANHEAT 등록 · 네이버 뉴스 언급':'FANHEAT 등록 아티스트';return `<button class="artist-trend-card" type="button" data-trend-index="${index}" aria-label="${esc(artist.name)} 선택"><strong>${esc(artist.name)}</strong><span>${esc(score+momentum)}</span><small>${esc(origin)}</small></button>`}).join(''):'<p class="artist-trend-empty">추천 후보를 찾지 못했습니다. 네이버 API 설정과 공개 아티스트 정보를 확인하세요.</p>';const generated=data.generated_at?new Date(data.generated_at).toLocaleString('ko-KR'):'시각 미확인',fallback=trendState==='ok'?'네이버 검색 추이 반영':trendState==='not_configured'?'네이버 트렌드 API 미설정 · FANHEAT 활동 기준':trendState==='error'?'네이버 트렌드 조회 실패 · FANHEAT/뉴스 언급 기준':'FANHEAT 활동 기준';$('artist-trend-status').className='artist-trend-status';$('artist-trend-status').textContent=`${fallback} · 갱신 ${generated}${discoveryState==='error'?' · 네이버 뉴스 신규 후보 조회 실패':''}`}
+async function loadArtistRecommendations(forceRefresh=false){const button=$('refresh-artist-trends'),status=$('artist-trend-status');button.disabled=true;button.textContent=forceRefresh?'새로고침 중…':'불러오는 중…';status.className='artist-trend-status';status.textContent=forceRefresh?'네이버 최신 뉴스와 검색 추이를 다시 확인하고 있습니다.':'네이버 트렌드 후보를 불러오고 있습니다.';try{const data=await api('/admin/api/artist-imports/recommendations'+(forceRefresh?'?refresh=true':''));renderArtistRecommendations(data)}catch(error){$('artist-trend-list').innerHTML='<p class="artist-trend-empty">트렌드 아티스트를 불러오지 못했습니다.</p>';status.className='artist-trend-status error';status.textContent=error.message}finally{button.disabled=false;button.textContent='최신 정보 새로고침'}}
+$('refresh-artist-trends').addEventListener('click',()=>loadArtistRecommendations(true));
+$('artist-trend-list').addEventListener('click',event=>{const card=event.target.closest('[data-trend-index]');if(!card)return;const artist=artistRecommendations[Number(card.dataset.trendIndex)];if(!artist)return;$('artist-name').value=artist.name||'';if(!$('artist-slug').readOnly)$('artist-slug').value=artist.slug||'';$('artist-trend-status').className='artist-trend-status';$('artist-trend-status').textContent=`${artist.name}을(를) 입력했습니다. 공식 후보 확인 후 수집을 실행하세요.`;$('artist-name').focus()});
 const identityStyle=document.createElement('style');identityStyle.textContent='.identity-dialog{width:min(720px,calc(100vw - 32px));max-height:85vh;overflow:auto;background:#151922;color:#f5f6f8;border:1px solid #64718b;border-radius:12px;padding:24px;font-size:14px}.identity-dialog::backdrop{background:#000b}.identity-dialog h2{font-size:20px;margin:0 0 12px}.identity-dialog p{font-size:14px}.identity-option{display:flex;gap:12px;padding:16px;margin:12px 0;border:1px solid #46516a;border-radius:8px;cursor:pointer}.identity-option:has(input:checked){border-color:#967aff;background:#28223c}.identity-option input{width:20px;height:20px;flex:none;accent-color:#967aff}.identity-option strong{font-size:16px}.identity-option span{display:block;overflow-wrap:anywhere}.identity-option small{display:block;font-size:13px;color:#c2c8d5;overflow-wrap:anywhere}.identity-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:20px;position:sticky;bottom:-24px;padding:16px 0;background:#151922}.identity-actions button{font-size:14px;min-height:44px}.identity-dialog a{color:#baa7ff}';document.head.appendChild(identityStyle);
 const identityDialog=document.createElement('dialog');identityDialog.className='identity-dialog';identityDialog.setAttribute('aria-labelledby','identity-title');identityDialog.setAttribute('aria-describedby','identity-description');identityDialog.innerHTML='<h2 id="identity-title">수집할 아티스트 확인</h2><p id="identity-description"></p><div id="identity-options"></div><div class="identity-actions"><button type="button" id="identity-cancel">취소 · 다시 검색</button><button type="button" id="identity-confirm" disabled>선택한 아티스트 수집</button></div>';document.body.appendChild(identityDialog);
 function chooseArtist(candidates,purpose='collect'){return new Promise(resolve=>{let selected=null;const options=$('identity-options'),confirmButton=$('identity-confirm');confirmButton.disabled=true;confirmButton.textContent=purpose==='sources'?'선택한 아티스트 출처 추가':'선택한 아티스트 수집';$('identity-description').textContent=candidates.length?`검색된 후보 ${candidates.length}명입니다. 한 명이어도 직접 확인해 주세요. 이름·설명·출처를 비교하여 선택하세요.`:'일치하는 후보를 찾지 못했습니다. 이름이나 영문명을 바꿔 다시 검색해 주세요. 수집은 시작되지 않았습니다.';options.innerHTML=candidates.map((c,i)=>`<label class="identity-option"><input type="radio" name="artist-identity" value="${i}" ${c.can_collect?'':'disabled'}><span><strong>${esc(c.label)}</strong><span>${esc(c.english_name||'')}</span><p>${esc(c.description)}</p><small>후보 ID: ${esc(c.id)}</small><small>${(c.official_source_urls||[]).map(esc).join('<br>')||'확인된 공식 채널 없음 · 입력한 공식 URL 사용'}</small><small>Wikimedia Commons: ${esc(c.commons_source_url||'아티스트 선택 후 검색 출처 생성')}</small>${!c.can_collect?'<small>수집 출처가 없어 선택할 수 없습니다. 공식 URL을 입력하고 다시 검색하세요.</small>':''}<a href="${esc(c.entity_url)}" target="_blank" rel="noopener noreferrer">후보 정보 확인</a></span></label>`).join('');options.onchange=event=>{selected=candidates[Number(event.target.value)];confirmButton.disabled=!selected?.can_collect};confirmButton.onclick=()=>{if(selected?.confirmation)identityDialog.close('confirm')};$('identity-cancel').onclick=()=>identityDialog.close('cancel');identityDialog.addEventListener('close',()=>resolve(identityDialog.returnValue==='confirm'?(purpose==='sources'?selected:selected?.confirmation):null),{once:true});identityDialog.returnValue='';identityDialog.showModal();$('identity-cancel').focus()})}
@@ -1482,9 +1682,15 @@ $('refresh-log').addEventListener('click',loadActivity);$('log-job').addEventLis
 $('job-search').addEventListener('input',renderJobs);$('job-status').addEventListener('change',renderJobs);$('job-sort').addEventListener('change',renderJobs);
 $('jobs').addEventListener('change',async event=>{const select=event.target.closest('[data-refresh-schedule]');if(!select)return;const artistId=select.dataset.refreshSchedule,card=select.closest('.job'),message=card.querySelector('.job-refresh small');select.disabled=true;message.className='schedule-saving';message.textContent='갱신 주기를 저장하고 있습니다…';try{await api(`/admin/api/artists/${encodeURIComponent(artistId)}/refresh-schedule`,{method:'PATCH',body:JSON.stringify({interval_seconds:Number(select.value)})});await loadJobs()}catch(error){message.textContent=error.message;select.disabled=false}});
 $('jobs').addEventListener('click',async event=>{const button=event.target.closest('[data-refresh-now]');if(!button)return;const artistId=button.dataset.refreshNow,card=button.closest('.job'),message=card.querySelector('.job-refresh small');button.disabled=true;message.className='schedule-saving';message.textContent='n8n에 갱신 작업을 요청하고 있습니다…';try{const result=await api(`/admin/api/artists/${encodeURIComponent(artistId)}/refresh`,{method:'POST'});message.textContent=result.message;activeLogJob=String(result.job_id);await Promise.all([loadJobs(),loadActivity()])}catch(error){message.textContent=error.message;button.disabled=false}});
-$('discover-artist-sources').addEventListener('click',async()=>{const button=$('discover-artist-sources'),status=$('source-discovery-status'),artistName=$('artist-name').value.trim();if(!artistName){status.className='error';status.textContent='먼저 아티스트 이름을 입력해 주세요.';$('artist-name').focus();return}const current=$('official-sources').value.split(/\\n|,/).map(value=>value.trim()).filter(Boolean),scopes=[...document.querySelectorAll('[name="scope"]:checked')].map(item=>item.value);const payload={artist_name:artistName,existing_artist_slug:$('artist-slug').value.trim()||null,country_code:$('artist-country').value,language_code:$('artist-language').value,official_source_urls:current,scopes:scopes.length?scopes:['profile'],album_limit:Number($('album-limit').value),gallery_limit:Number($('gallery-limit').value),storage_bucket:$('storage-bucket').value.trim(),review_before_publish:$('review-mode').value==='review'};button.disabled=true;status.className='';status.textContent='Wikidata와 공식 채널 정보를 확인하고 있습니다…';try{const preview=await api('/admin/api/artist-imports/candidates',{method:'POST',body:JSON.stringify(payload)}),candidate=await chooseArtist(preview.candidates||[],'sources');if(!candidate){status.textContent='출처 찾기를 취소했습니다.';return}const official=[...current,...(candidate.official_source_urls||[])],commons=candidate.commons_source_url,merged=listUnique(official.filter(url=>url!==commons));if(commons)merged.splice(Math.min(merged.length,19),0,commons);$('official-sources').value=merged.slice(0,20).join(String.fromCharCode(10));status.className='success';status.textContent=`공식 채널 ${(candidate.official_source_urls||[]).length}개와 Wikimedia Commons 출처를 반영했습니다.`}catch(error){status.className='error';status.textContent=error.message}finally{button.disabled=false}});
+$('discover-artist-sources').addEventListener('click',()=>discoverArtistSources(true));
 function listUnique(values){return [...new Set(values)]}
-importForm.addEventListener('submit',async event=>{event.preventDefault();const button=topRun,status=$('form-status'),artistName=$('artist-name').value.trim(),scopes=[...document.querySelectorAll('[name="scope"]:checked')].map(item=>item.value),sources=$('official-sources').value.split(/\\n|,/).map(value=>value.trim()).filter(Boolean),showStatus=(message,tone='')=>{status.textContent=message;runStatus.textContent=message;runStatus.className=`hero-run-status ${tone}`.trim()};if(!artistName){showStatus('아티스트 이름을 입력해 주세요.','error');$('artist-name').focus();return}if(!scopes.length){showStatus('가져올 콘텐츠를 하나 이상 선택하세요.','error');return}if(sources.length>20){showStatus('공식 채널 URL은 최대 20개까지 입력할 수 있습니다.','error');return}const payload={artist_name:artistName,existing_artist_slug:$('artist-slug').value.trim()||null,country_code:$('artist-country').value,language_code:$('artist-language').value,official_source_urls:sources,scopes,album_limit:Number($('album-limit').value),gallery_limit:Number($('gallery-limit').value),storage_bucket:$('storage-bucket').value.trim(),review_before_publish:$('review-mode').value==='review'};button.disabled=true;showStatus(sources.length?'입력한 공식 채널을 확인하고 있습니다…':'아티스트 이름으로 공식 홈페이지와 SNS 채널을 찾고 있습니다…');try{const preview=await api('/admin/api/artist-imports/candidates',{method:'POST',body:JSON.stringify(payload)});showStatus('수집할 아티스트를 확인해 주세요. 아직 수집은 시작되지 않았습니다.');const confirmation=await chooseArtist(preview.candidates||[]);if(!confirmation){showStatus('아티스트 선택을 취소했습니다. 수집은 시작되지 않았습니다.');return}payload.identity_confirmation=confirmation;showStatus('선택한 아티스트의 수집을 시작합니다…');const result=await api('/admin/api/artist-imports',{method:'POST',body:JSON.stringify(payload)});showStatus(result.message,'success');activeLogJob=String(result.job_id);await Promise.all([loadJobs(),loadActivity()])}catch(error){showStatus(error.message,'error')}finally{button.disabled=false}});
+function sourceMatchesCountry(value,country){try{const url=new URL(value),host=url.hostname.toLowerCase(),target=(host+url.pathname.toLowerCase()),localized=host.endsWith('.jp')||/(^|[._/-])(jp|japan|japanese)([._/-]|$)/.test(target)?'JP':host.endsWith('.kr')||/(^|[._/-])(kr|korea|korean)([._/-]|$)/.test(target)?'KR':host.endsWith('.uk')||/(^|[._/-])(uk|britain|british)([._/-]|$)/.test(target)?'GB':null;return !localized||localized===country}catch{return true}}
+function selectedSourceUrls(){const values=$('official-sources').value.split(/\\n|,/).map(value=>value.trim()).filter(Boolean),domestic=$('source-search-region').value==='domestic';return listUnique(domestic?values.filter(url=>sourceMatchesCountry(url,$('artist-country').value)):values)}
+function applySelectedSourceRegion(){const filtered=selectedSourceUrls();$('official-sources').value=filtered.slice(0,20).join(String.fromCharCode(10));return filtered}
+async function discoverArtistSources(interactive=false){const button=$('discover-artist-sources'),status=$('source-discovery-status'),artistName=$('artist-name').value.trim();if(!artistName){if(interactive){status.className='error';status.textContent='먼저 아티스트 이름을 입력해 주세요.';$('artist-name').focus()}return}const retained=applySelectedSourceRegion(),scopes=[...document.querySelectorAll('[name="scope"]:checked')].map(item=>item.value),searchRegion=$('source-search-region').value,countryCode=$('artist-country').value,payload={artist_name:artistName,existing_artist_slug:$('artist-slug').value.trim()||null,country_code:countryCode,language_code:$('artist-language').value,source_search_region:searchRegion,official_source_urls:retained,official_youtube_url:$('official-youtube-url').value.trim()||null,scopes:scopes.length?scopes:['profile'],album_limit:Number($('album-limit').value),gallery_limit:Number($('gallery-limit').value),storage_bucket:$('storage-bucket').value.trim(),review_before_publish:$('review-mode').value==='review'};button.disabled=true;status.className='';status.textContent=searchRegion==='global'?'해외를 포함해 Wikidata와 공식 채널 API를 확인하고 있습니다…':'기준 국가에 맞는 저장 출처와 API 후보를 확인하고 있습니다…';try{const preview=await api('/admin/api/artist-imports/candidates',{method:'POST',body:JSON.stringify(payload)}),candidates=preview.candidates||[],key=value=>String(value||'').normalize('NFKC').replace(/[^0-9a-z가-힣]/gi,'').toLowerCase();let candidate;if(interactive)candidate=await chooseArtist(candidates,'sources');else candidate=candidates.find(item=>item.country_match&&[item.label,item.english_name].some(name=>key(name)===key(artistName)));if(!candidate){status.className=interactive?'':'error';status.textContent=interactive?'출처 찾기를 취소했습니다.':'기준 국가에서 아티스트를 정확히 식별하지 못했습니다. API 찾아보기에서 후보를 확인해 주세요.';return}const official=[...retained,...(candidate.official_source_urls||[])].filter(url=>searchRegion!=='domestic'||sourceMatchesCountry(url,countryCode)),commons=candidate.commons_source_url,merged=listUnique(official.filter(url=>url!==commons));if(commons)merged.splice(Math.min(merged.length,19),0,commons);$('official-sources').value=merged.slice(0,20).join(String.fromCharCode(10));status.className='success';status.textContent=`기준 국가에 맞는 공식 채널 ${(candidate.official_source_urls||[]).filter(url=>searchRegion!=='domestic'||sourceMatchesCountry(url,countryCode)).length}개와 Wikimedia Commons 출처를 반영했습니다.`}catch(error){status.className='error';status.textContent=error.message}finally{button.disabled=false}}
+$('artist-country').addEventListener('change',applySelectedSourceRegion);$('source-search-region').addEventListener('change',()=>{if($('source-search-region').value==='domestic')applySelectedSourceRegion()});
+$('official-youtube-url').addEventListener('input',event=>{const youtube=event.target.value.trim(),sources=$('official-sources').value.split(/\\n|,/).map(value=>value.trim()).filter(Boolean).filter(value=>!/^https:[/][/](?:www[.]|m[.])?youtube[.]com[/](?:@|channel[/]|c[/]|user[/])/i.test(value));$('official-sources').value=listUnique([...(youtube?[youtube]:[]),...sources]).slice(0,20).join(String.fromCharCode(10))});
+importForm.addEventListener('submit',async event=>{event.preventDefault();const button=topRun,status=$('form-status'),artistName=$('artist-name').value.trim(),scopes=[...document.querySelectorAll('[name="scope"]:checked')].map(item=>item.value),sources=$('official-sources').value.split(/\\n|,/).map(value=>value.trim()).filter(Boolean),showStatus=(message,tone='')=>{status.textContent=message;runStatus.textContent=message;runStatus.className=`hero-run-status ${tone}`.trim()};if(!artistName){showStatus('아티스트 이름을 입력해 주세요.','error');$('artist-name').focus();return}if(!scopes.length){showStatus('가져올 콘텐츠를 하나 이상 선택하세요.','error');return}if(sources.length>20){showStatus('공식 채널 URL은 최대 20개까지 입력할 수 있습니다.','error');return}const payload={artist_name:artistName,existing_artist_slug:$('artist-slug').value.trim()||null,country_code:$('artist-country').value,language_code:$('artist-language').value,source_search_region:$('source-search-region').value,official_source_urls:sources,official_youtube_url:$('official-youtube-url').value.trim()||null,scopes,album_limit:Number($('album-limit').value),gallery_limit:Number($('gallery-limit').value),storage_bucket:$('storage-bucket').value.trim(),review_before_publish:$('review-mode').value==='review'};button.disabled=true;showStatus(sources.length?'입력한 공식 채널을 확인하고 있습니다…':'아티스트 이름으로 공식 홈페이지와 SNS 채널을 찾고 있습니다…');try{const preview=await api('/admin/api/artist-imports/candidates',{method:'POST',body:JSON.stringify(payload)});showStatus('수집할 아티스트를 확인해 주세요. 아직 수집은 시작되지 않았습니다.');const confirmation=await chooseArtist(preview.candidates||[]);if(!confirmation){showStatus('아티스트 선택을 취소했습니다. 수집은 시작되지 않았습니다.');return}payload.identity_confirmation=confirmation;showStatus('선택한 아티스트의 수집을 시작합니다…');const result=await api('/admin/api/artist-imports',{method:'POST',body:JSON.stringify(payload)});showStatus(result.message,'success');activeLogJob=String(result.job_id);await Promise.all([loadJobs(),loadActivity()])}catch(error){showStatus(error.message,'error')}finally{button.disabled=false}});
 const detailId=new URLSearchParams(location.search).get('detail');
 const isDetail=detailId!==null;
 document.body.classList.add(isDetail?'artist-detail-page':'artist-list-page');
@@ -1647,13 +1853,13 @@ function renderArtistResult(job){
  const r=job?.report,settings=job?.settings||job?.request||{},scopes=new Set(settings.scopes||[]),status=job?.status||'pending',quality=r?.quality||'',badge=$('result-tab-count');
  badge.textContent=!job?'대기':status==='completed'?(quality==='complete'?'완료':'보완 필요'):status==='running'?`${Number(job.progress)||0}%`:stateLabels[status]||status;
  if(!r){resultPane.innerHTML=`<div class="result-hero"><div><div class="eyebrow">COLLECTION RESULT</div><h2>${esc(job?.artist_name||'수집 결과')}</h2><p>수집이 시작되면 항목별 현황과 확인된 내용이 이곳에 표시됩니다.</p></div><span class="result-state ${esc(status)}">${esc(stateLabels[status]||'수집 전')}</span></div><div class="result-empty">아직 생성된 수집 결과가 없습니다. 편집기에서 수집을 실행하거나 진행이 완료될 때까지 기다려 주세요.</div>`;return}
- const profile=r.profile||{},socials=Object.entries(r.official_socials||{}),writing=r.llm_writing||{},evidence=Array.isArray(r.evidence)?r.evidence:[],gallery=r.gallery_review||{},galleryItems=Array.isArray(gallery.items)?gallery.items:[],issues=job.completion_issues||[],missing=(r.missing||[]).map(String),publication=r.publication==='published'?'공개 반영':'관리자 검토 대기';
- const defs=[['profile','프로필',Object.values(profile).filter(Boolean).length,'확인 필드'],['socials','공식 SNS',socials.length,'개 채널'],['biography','소개',writing.biography?.entries?.length||0,'개 문단'],['history','연혁',writing.history?.entries?.length||0,'개 항목'],['awards','수상',writing.awards?.entries?.length||0,'개 항목'],['albums','앨범',Number(r.albums_found)||0,'개'],['tracks','수록곡',Number(r.tracks_found)||0,`곡 · 영상 ${Number(r.youtube_linked)||0}개`],['gallery','갤러리',galleryItems.length,'개 판별']];
+ const profile=r.profile||{},socials=Object.entries(r.official_socials||{}),writing=r.llm_writing||{},evidence=Array.isArray(r.evidence)?r.evidence:[],gallery=r.gallery_review||{},galleryItems=Array.isArray(gallery.items)?gallery.items:[],issues=job.completion_issues||[],missing=(r.missing||[]).map(String),publication=r.publication==='published'?'공개 반영':'관리자 검토 대기',persisted=job.persisted_counts||{},hasPersisted=Boolean(job.artist_id),actual=(key,fallback)=>hasPersisted?Number(persisted[key])||0:fallback;
+ const defs=[['profile','프로필',actual('profile',Object.values(profile).filter(Boolean).length),'DB 저장 필드'],['socials','공식 SNS',actual('socials',socials.length),'DB 저장 채널'],['biography','소개',actual('biography',writing.biography?.entries?.length||0),'DB 저장 문단'],['history','연혁',actual('history',writing.history?.entries?.length||0),'DB 저장 항목'],['awards','수상',actual('awards',writing.awards?.entries?.length||0),'DB 저장 항목'],['albums','앨범',actual('albums',Number(r.albums_found)||0),'DB 저장 앨범'],['tracks','수록곡',actual('tracks',Number(r.tracks_found)||0),`DB 저장 곡 · 영상 ${Number(r.youtube_linked)||0}개`],['gallery','갤러리',actual('gallery',galleryItems.length),'DB 저장 이미지']];
  const issueWords={profile:['데뷔','프로필'],socials:['SNS'],biography:['biography','소개'],history:['history','연혁'],awards:['awards','수상'],albums:['앨범'],tracks:['수록곡','영상'],gallery:['갤러리']};
  const scopeCards=defs.map(([key,label,count,suffix])=>{const selected=scopes.has(key),warning=selected&&missing.some(reason=>(issueWords[key]||[]).some(word=>reason.includes(word))),state=!selected?'skipped':warning?'warning':count?'complete':'warning',stateText=!selected?'수집 제외':warning?'확인 필요':'수집 완료';return `<article class="result-scope-card"><header><h4>${label}</h4><span class="scope-state ${state}">${stateText}</span></header><strong>${selected?count:'—'}</strong><p>${selected?suffix:'이번 작업에서 선택하지 않은 항목'}</p></article>`}).join('');
  const profileParagraphs=(profile.paragraphs_original||[]).map(text=>`<p>${esc(text)}</p>`).join('');
  const socialItems=socials.map(([name,value])=>`<li><strong>${esc(name)}</strong> · ${resultLink(value?.url,value?.url)}${value?.evidence_url?`<br><small>근거 ${resultLink(value.evidence_url,value.evidence_url)}</small>`:''}</li>`).join('');
- const writingCards=['biography','history','awards'].map(key=>{const labels={biography:'소개',history:'연혁',awards:'수상'},entries=writing[key]?.entries||[];return entries.length?`<article class="result-content-card"><h4>${labels[key]} 수집 내용</h4><ul>${entries.map(entry=>`<li>${esc(resultEntryText(entry))}</li>`).join('')}</ul></article>`:''}).join('');
+ const writingCards=['biography','history','awards'].map(key=>{const labels={biography:'소개',history:'연혁',awards:'수상'},entries=writing[key]?.entries||[];return `<article class="result-content-card"><h4>${labels[key]} 수집 내용</h4><ul>${entries.map(entry=>`<li style="display:grid;grid-template-columns:54px minmax(0,1fr);gap:12px"><span>${esc(entry.year||'')}</span><span>${esc(entry.text||'')}</span></li>`).join('')}</ul>${entries.length?'':'<p>확인된 항목이 없습니다. 출처를 보완해 재수집하세요.</p>'}</article>`}).join('');
  const albumItems=evidence.map(album=>`<details><summary>${esc(album.title||'제목 미확인')} · ${(album.tracks||[]).length}곡</summary><p>${album.release_date?`발매 ${esc(album.release_date)} · `:''}${resultLink(album.source_url,'공식 근거 보기')}</p><ul>${(album.tracks||[]).map(track=>`<li>${esc(track.title||'곡명 미확인')} · ${track.url?resultLink(track.url,'공식 영상 연결'):'영상 미연결'}</li>`).join('')||'<li>확인된 수록곡이 없습니다.</li>'}</ul></details>`).join('');
  const galleryCounts=['photo_candidate','review','exclude'].map(decision=>galleryItems.filter(item=>item.decision===decision).length),galleryLinks=galleryItems.slice(0,12).map((item,index)=>`<li>${resultLink(item.source_url||item.image_url,`이미지 후보 ${index+1}`)} · ${esc(item.decision||'미분류')}${item.reason?` · ${esc(item.reason)}`:''}</li>`).join('');
  const issueCards=issues.map(issue=>`<article class="result-issue"><strong>${esc(issue.title)}</strong><p>${esc(issue.detail)}</p><p><b>필요한 조치:</b> ${esc(issue.action)}</p></article>`).join('');
@@ -1679,20 +1885,25 @@ function renderCollectionTiming(job){
 }
 renderCollectionTiming(null);renderArtistResult(null);
 async function loadCollectionTiming(){const id=timingJobId;if(!id)return;try{const job=await originalApi('/admin/api/artist-imports/'+encodeURIComponent(id));if(id===timingJobId){renderCollectionTiming(job);renderArtistResult(job)}}catch{if(id===timingJobId){timing.dataset.state='failed';timing.textContent='상태 조회 실패 · 잠시 후 다시 확인합니다.'}}}
-api=async function(url,options={}){const starting=url==='/admin/api/artist-imports'&&options.method==='POST';if(detailId&&detailId!=='new'&&starting)url='/admin/api/artist-imports/'+encodeURIComponent(detailId)+'/recollect';const result=await originalApi(url,options);if(starting&&result.job_id){timingJobId=String(result.job_id);renderCollectionTiming({status:result.status||'pending'});await loadCollectionTiming()}return result};
+api=async function(url,options={}){const starting=url==='/admin/api/artist-imports'&&options.method==='POST';if(detailId&&detailId!=='new'&&!detailId.startsWith('artist-')&&starting)url='/admin/api/artist-imports/'+encodeURIComponent(detailId)+'/recollect';const result=await originalApi(url,options);if(starting&&result.job_id){timingJobId=String(result.job_id);renderCollectionTiming({status:result.status||'pending'});await loadCollectionTiming()}return result};
 async function initializeArtistPage(){
  if(isDetail&&detailId!=='new'){
+  artistTrendsSection.hidden=true;
   topRun.disabled=true;
-  try{const job=await api('/admin/api/artist-imports/'+encodeURIComponent(detailId));const s=job.settings||{};
-   const fields={'artist-name':s.artist_name||job.artist_name,'artist-slug':s.existing_artist_slug||job.artist_slug||'','artist-country':s.country_code||'KR','artist-language':s.language_code||'ko','official-sources':(s.official_source_urls||[]).join(String.fromCharCode(10)),'album-limit':s.album_limit??50,'gallery-limit':s.gallery_limit??40,'storage-bucket':s.storage_bucket||'fanheat-assets','review-mode':s.review_before_publish===false?'direct':'review'};
+  try{const job=await api('/admin/api/artist-imports/'+encodeURIComponent(detailId));const s=job.settings||{},country=s.country_code||'KR',region=s.source_search_region||'domestic',savedSources=s.official_source_urls||[],visibleSources=region==='domestic'?savedSources.filter(url=>sourceMatchesCountry(url,country)):savedSources;
+   const fields={'artist-name':s.artist_name||job.artist_name,'artist-slug':s.existing_artist_slug||job.artist_slug||'','artist-country':country,'artist-language':s.language_code||'ko','source-search-region':region,'official-sources':visibleSources.join(String.fromCharCode(10)),'album-limit':s.album_limit??50,'gallery-limit':s.gallery_limit??40,'storage-bucket':s.storage_bucket||'fanheat-assets','review-mode':s.review_before_publish===false?'direct':'review'};
    for(const [id,value] of Object.entries(fields))$(id).value=value;
+   $('official-youtube-url').value=s.official_youtube_url||(s.official_source_urls||[]).find(value=>/^https:[/][/](?:www[.]|m[.])?youtube[.]com[/](?:@|channel[/]|c[/]|user[/])/i.test(value))||'';
    document.querySelectorAll('[name="scope"]').forEach(input=>input.checked=(s.scopes||[]).includes(input.value));
    $('artist-slug').readOnly=true;
    document.querySelector('.hero h2').textContent=job.artist_name+' · 수집 설정';topRun.textContent='변경 설정으로 재수집';
    runStatus.textContent='설정을 수정한 뒤 재수집하세요. 실행 전까지 변경 사항은 저장되지 않습니다.';
+   if(visibleSources.length<savedSources.length){$('source-discovery-status').className='success';$('source-discovery-status').textContent=`저장된 설정을 불러오고 기준 국가와 다른 출처 ${savedSources.length-visibleSources.length}개를 제외했습니다.`}
    activeLogJob=String(job.job_id);renderCollectionTiming(job);renderArtistResult(job);topRun.disabled=false;
+   const usableSources=visibleSources.filter(url=>!String(url).includes('commons.wikimedia.org'));if(!usableSources.length&&!$('official-youtube-url').value)await discoverArtistSources(false);
   }catch(error){runStatus.textContent=error.message;return}
  }
+ if(isDetail&&detailId==='new')loadArtistRecommendations();
  if(!isDetail){await loadJobs();setInterval(loadJobs,5000)}
  if(isDetail){await loadActivity();setInterval(loadActivity,2000);setInterval(loadCollectionTiming,2000)}
  loadN8n();setInterval(loadN8n,30000);
@@ -1716,8 +1927,8 @@ ADMIN_HTML = """<!doctype html>
     label{font-size:13px;color:var(--muted);font-weight:700}input,select,button{font:inherit;font-size:14px;border-radius:9px}input,select{width:100%;min-height:44px;padding:11px 12px;background-color:#101219;color:var(--text);border:1px solid var(--line);outline:none}input:focus,select:focus{border-color:#6d7890;box-shadow:0 0 0 2px #6d789033}select{appearance:none;-webkit-appearance:none;padding-right:44px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='8' viewBox='0 0 14 8'%3E%3Cpath d='M1 1l6 6 6-6' fill='none' stroke='%23c7cdd8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 16px center;background-size:14px 8px;cursor:pointer}select::-ms-expand{display:none}
     .tagbox{display:flex;flex-wrap:wrap;align-items:center;gap:8px;min-height:48px;padding:8px;background:#101219;border:1px solid var(--line);border-radius:9px}.tagbox:focus-within{border-color:#626b7d}.tagbox #tags{display:contents}.tag{display:inline-flex;align-items:center;gap:7px;background:#2c3140;border:1px solid #444b5d;border-radius:999px;padding:6px 8px 6px 11px;font-size:14px}.tag button{background:transparent;color:#c9cfda;padding:0 3px;font-size:16px;line-height:1}.tagbox input{flex:1;min-width:180px;padding:6px;border:0;background:transparent;outline:0}
     .x-drive-settings{grid-column:1/-1;display:grid;gap:7px;padding:14px;border:1px solid #3f6c5a;border-radius:10px;background:#16352955}.x-drive-settings[hidden],.direct-search-setting[hidden],.news-source-settings[hidden]{display:none!important}.x-drive-settings strong{font-size:14px;color:var(--ok)}.x-drive-settings span{font-size:13px;color:#d4ddd9}.x-drive-settings code{overflow-wrap:anywhere;color:#a7d8c2;font-size:12px}
-    .news-date-range{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;border:1px solid #3e526f;border-radius:10px;background:#101722}.news-date-range[hidden]{display:none!important}.news-date-range .field{margin:0}.news-date-range p{grid-column:1/-1;margin:0;color:var(--muted);font-size:12px}.news-recommendations{grid-column:1/-1;display:grid;gap:10px;padding:13px;border:1px solid #4d456f;border-radius:10px;background:#211d32}.news-recommendations[hidden]{display:none!important}.news-recommendation-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.news-recommendation-head strong{display:block;font-size:14px}.news-recommendation-head span{display:block;margin-top:2px;color:#c4bbdf;font-size:12px}.news-recommendation-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}.news-recommendation-head button{min-height:36px;padding:7px 10px;background:#7057e8;white-space:nowrap}.news-recommendation-head button.secondary{background:#343047;color:#eee9ff}.news-auto-toggle{display:flex;align-items:flex-start;gap:8px;color:#e3ddf6;font-size:13px}.news-auto-toggle input{width:17px;height:17px;min-height:0;margin-top:2px;accent-color:#8b6cff}.news-idol-list{display:flex;flex-wrap:wrap;gap:6px}.news-idol-chip{padding:5px 8px;border:1px solid #5a4f7b;border-radius:999px;background:#171326;color:#ddd5f5;font-size:12px}.news-recommendation-empty{color:#b8afcf;font-size:12px}.news-source-settings{grid-column:1/-1;display:grid;gap:10px;padding:14px;border:1px solid #3e526f;border-radius:10px;background:#101722}.news-source-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.news-source-head strong{display:block;font-size:14px}.news-source-head span,.news-source-note{display:block;color:var(--muted);font-size:12px}.news-source-head button,.news-source-actions button{min-height:36px;padding:7px 10px}.news-source-list{display:grid;gap:9px}.news-source-row{display:grid;grid-template-columns:minmax(110px,.7fr) minmax(150px,1fr);gap:8px;padding:11px;border:1px solid #343d4d;border-radius:9px;background:#151a22}.news-source-row .rss{grid-column:1/-1}.news-source-row input[type=text],.news-source-row input[type=url]{min-height:40px}.news-source-checks{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px 16px}.news-source-checks label{display:flex;align-items:center;gap:7px;color:#dce2ed;font-size:12px}.news-source-checks input{width:17px;height:17px;min-height:0;accent-color:#8b6cff}.news-source-remove{justify-self:end;min-height:32px;padding:5px 9px;background:#452432;color:#ffb2c0}.news-source-actions{display:flex;justify-content:flex-end}.news-source-empty{padding:12px;border:1px dashed #414858;border-radius:8px;color:var(--muted);font-size:12px;text-align:center}
-    button{border:0;background:var(--hot);color:white;font-weight:800;padding:12px 22px;cursor:pointer}button:disabled{opacity:.35;cursor:not-allowed;filter:saturate(.25);box-shadow:none!important}.actions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:18px}.actions .secondary{background:#343a48}
+    .news-date-range,.youtube-custom-date-range{display:grid;grid-template-columns:1fr 1fr;gap:8px;padding:12px;border:1px solid #3e526f;border-radius:10px;background:#101722}.news-date-range[hidden],.youtube-custom-date-range[hidden]{display:none!important}.news-date-range .field,.youtube-custom-date-range .field{margin:0}.news-date-range p,.youtube-custom-date-range p{grid-column:1/-1;margin:0;color:var(--muted);font-size:12px}.news-recommendations{grid-column:1/-1;display:grid;gap:10px;padding:13px;border:1px solid #4d456f;border-radius:10px;background:#211d32}.news-recommendations[hidden]{display:none!important}.news-recommendation-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.news-recommendation-head strong{display:block;font-size:14px}.news-recommendation-head span{display:block;margin-top:2px;color:#c4bbdf;font-size:12px}.news-recommendation-actions{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px}.news-recommendation-head button{min-height:36px;padding:7px 10px;background:#7057e8;white-space:nowrap}.news-recommendation-head button.secondary{background:#343047;color:#eee9ff}.news-auto-toggle{display:flex;align-items:flex-start;gap:8px;color:#e3ddf6;font-size:13px}.news-auto-toggle input{width:17px;height:17px;min-height:0;margin-top:2px;accent-color:#8b6cff}.news-idol-list{display:flex;flex-wrap:wrap;gap:6px}.news-idol-chip{padding:5px 8px;border:1px solid #5a4f7b;border-radius:999px;background:#171326;color:#ddd5f5;font-size:12px}.news-recommendation-empty{color:#b8afcf;font-size:12px}.news-source-settings{grid-column:1/-1;display:grid;gap:10px;padding:14px;border:1px solid #3e526f;border-radius:10px;background:#101722}.news-source-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.news-source-head strong{display:block;font-size:14px}.news-source-head span,.news-source-note{display:block;color:var(--muted);font-size:12px}.news-source-head button,.news-source-actions button{min-height:36px;padding:7px 10px}.news-source-list{display:grid;gap:9px}.news-source-row{display:grid;grid-template-columns:minmax(110px,.7fr) minmax(150px,1fr);gap:8px;padding:11px;border:1px solid #343d4d;border-radius:9px;background:#151a22}.news-source-row .rss{grid-column:1/-1}.news-source-row input[type=text],.news-source-row input[type=url]{min-height:40px}.news-source-checks{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:8px 16px}.news-source-checks label{display:flex;align-items:center;gap:7px;color:#dce2ed;font-size:12px}.news-source-checks input{width:17px;height:17px;min-height:0;accent-color:#8b6cff}.news-source-remove{justify-self:end;min-height:32px;padding:5px 9px;background:#452432;color:#ffb2c0}.news-source-actions{display:flex;justify-content:flex-end}.news-source-empty{padding:12px;border:1px dashed #414858;border-radius:8px;color:var(--muted);font-size:12px;text-align:center}
+    button{border:0;background:var(--hot);color:white;font-weight:800;padding:12px 22px;cursor:pointer}button:disabled{opacity:.35;cursor:not-allowed;filter:saturate(.25);box-shadow:none!important}.actions{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:18px}.actions .secondary{background:#343a48}.actions #run.terminate{background:#8d3b4e;box-shadow:0 0 0 1px #bd6075,0 5px 16px #71334245}
     pre{white-space:pre-wrap;word-break:break-word;background:#101219;border:1px solid var(--line);padding:14px;border-radius:10px;color:#dce2ed;font-size:12px;min-height:72px}
     .status{padding:14px;border-radius:10px;background:#101219;border:1px solid var(--line)}.status strong{color:var(--warn)}.status.done strong{color:var(--ok)}.status.failed strong{color:var(--hot)}
     table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px 8px;border-bottom:1px solid var(--line);font-size:13px}th{color:var(--muted)}
@@ -1743,6 +1954,7 @@ ADMIN_HTML = """<!doctype html>
       .workspace .panel,.workbench{border-radius:0;border-top:0;border-bottom:0}.workspace .setup-panel{border-left:0}.workspace .jobs-panel{border-right:0}.panel-resizer{background:#11141b;border-left:1px solid var(--line);border-right:1px solid var(--line)}.panel-resizer::after{left:2px;top:0;bottom:0;width:1px;background:#4a5262}.panel-resizer:hover::after,.panel-resizer.dragging::after{left:1px;width:3px}
       .command-dock{left:0;right:0;border-radius:0;border-left:0;border-right:0;border-bottom:0}.command-dock .dock-resizer::after{left:42%;right:42%}
     }
+    .source-logo.tiktok{background:#050505;color:#fff;font:900 16px/1 Arial,sans-serif;text-shadow:1px 1px #25f4ee,-1px -1px #fe2c55}
   </style>
 </head>
 <body><main>
@@ -1763,7 +1975,8 @@ ADMIN_HTML = """<!doctype html>
         <div class="field direct-search-setting"><label for="language">우선 언어</label><select id="language"><option value="ko">한국어</option><option value="ja">일본어</option><option value="en">영어</option><option value="zh-Hant">중국어(번체)</option><option value="id">인도네시아어</option><option value="th">태국어</option><option value="vi">베트남어</option><option value="pt">포르투갈어</option><option value="es">스페인어</option><option value="de">독일어</option><option value="fr">프랑스어</option></select></div>
         <div class="field direct-search-setting"><label for="language-filter-mode">언어 적용 방식</label><select id="language-filter-mode"><option value="strict">선택 언어만 · 공식 K-POP 채널 예외</option><option value="prefer">선택 언어 우선 · 해외 콘텐츠 허용</option></select></div>
         <div class="field direct-search-setting"><label for="order">정렬</label><select id="order"><option value="viewCount">조회수</option><option value="date">최신순</option><option value="relevance">관련도</option></select></div>
-        <div class="field direct-search-setting relative-time-setting"><label for="hours">최근 몇 시간</label><input id="hours" type="number" min="1" max="720" value="24"></div>
+        <div class="field direct-search-setting relative-time-setting"><label for="youtube-period">수집 기간</label><select id="youtube-period"><option value="24">1일</option><option value="168">1주</option><option value="336">2주</option><option value="720">1개월</option><option value="2160">3개월</option><option value="4320">6개월</option><option value="8760">12개월</option><option value="custom">기타 날짜 선택</option></select></div>
+        <div id="youtube-custom-date-range" class="youtube-custom-date-range direct-search-setting" hidden><div class="field"><label for="youtube-date-start">YouTube 수집 시작일</label><input id="youtube-date-start" type="date"></div><div class="field"><label for="youtube-date-end">YouTube 수집 종료일</label><input id="youtube-date-end" type="date"></div><p>한국 시간 기준이며 종료일에 공개된 영상까지 포함합니다.</p></div>
         <div id="news-date-range" class="news-date-range" hidden><div class="field"><label for="news-date-start">뉴스 수집 시작일</label><input id="news-date-start" type="date" required></div><div class="field"><label for="news-date-end">뉴스 수집 종료일</label><input id="news-date-end" type="date" required></div><p>한국 시간 기준이며 종료일에 발행된 기사까지 포함합니다. 기본값은 최근 7일입니다.</p></div>
         <section id="news-source-settings" class="news-source-settings" hidden><div class="news-source-head"><div><strong>수집 허용 언론사</strong><span>한 곳 이상 등록하면 기사 원문 도메인이 일치하는 언론사만 수집합니다.</span></div><button id="add-news-source" type="button" class="secondary">+ 언론사 추가</button></div><div id="news-source-list" class="news-source-list"></div><p class="news-source-note">기사 이미지는 복제하지 않습니다. ‘RSS/API·OpenGraph 썸네일 허용’을 켠 언론사는 RSS가 없어도 기사 원문의 OG 이미지를 링크 카드 미리보기로 사용할 수 있습니다.</p><div class="news-source-actions"><button id="save-news-sources" type="button" class="secondary">언론사 설정 저장</button></div></section>
       </div></section><section id="ai-settings-panel" class="setup-tab-panel" role="tabpanel" aria-labelledby="ai-settings-tab" hidden><div class="grid">
@@ -1789,7 +2002,7 @@ ADMIN_HTML = """<!doctype html>
   <section class="command-dock"><div id="dock-resizer" class="dock-resizer" role="separator" aria-label="실행 콘솔 패널 높이 조절" aria-orientation="horizontal" tabindex="0"></div><div class="console-heading"><h2>실행 콘솔 <span id="console-source-label" class="source-context">YouTube</span></h2><button id="clear-command-log" type="button">현재 소스 기록 지우기</button></div><div class="console-main"><nav class="console-tabs" role="tablist" aria-label="실행 콘솔 출력 종류"><button id="console-output-tab" type="button" class="active" role="tab" aria-selected="true" data-console-tab="output">OUTPUT <span id="console-output-count" class="console-count"></span></button><button id="console-error-tab" type="button" role="tab" aria-selected="false" data-console-tab="error">ERROR <span id="console-error-count" class="console-count"></span></button></nav><pre id="command" role="tabpanel" aria-live="polite">입력값을 바꾸면 실행할 API 요청이 여기에 표시됩니다.</pre></div></section>
   <footer class="statusbar"><b>● COLLECTOR</b><div id="status" class="status">아직 실행한 작업이 없습니다.</div><div id="n8n-status" class="n8n-status" aria-live="polite"><a id="n8n-overall" class="n8n-overall" href="http://localhost:5678/" target="_blank" rel="noopener noreferrer" title="n8n 관리 화면을 새 창에서 엽니다.">● n8n 확인 중</a><div id="n8n-workflows" class="n8n-workflows"></div><button id="refresh-n8n-status" class="n8n-refresh" type="button">새로고침</button></div></footer>
 </main><script>
-const $=id=>document.getElementById(id); let timer; let tags=[];let selectedDrafts=new Set();let loadedDrafts=[];let visibleDrafts=[];let draftType='all';let selectedMedia=new Set();let loadedMedia=[];let visibleMedia=[];let commandPreview='';let previewGeneratedAt=null;let commandLogs=[];let sourceCapabilities={};let consoleTab=localStorage.getItem('fanheat-console-tab')==='error'?'error':'output';let aiPipelineRunning=false;let pipelineControlState=[];let pipelineMediaIds=[];try{commandLogs=JSON.parse(localStorage.getItem('fanheat-command-logs')||'[]')}catch{}
+const $=id=>document.getElementById(id); let timer; let tags=[];let selectedDrafts=new Set();let loadedDrafts=[];let visibleDrafts=[];let draftType='all';let selectedMedia=new Set();let loadedMedia=[];let visibleMedia=[];let commandPreview='';let previewGeneratedAt=null;let commandLogs=[];let sourceCapabilities={};let consoleTab=localStorage.getItem('fanheat-console-tab')==='error'?'error':'output';let aiPipelineRunning=false;let pipelineControlState=[];let pipelineMediaIds=[];let activeCollectionIds=[];let activeCollectionLogId='';let collectionTerminating=false;try{commandLogs=JSON.parse(localStorage.getItem('fanheat-command-logs')||'[]')}catch{}
 const root=document.documentElement,layoutDefaults={left:330,right:310,dock:78};
 function restoreLayout(){try{const saved=JSON.parse(localStorage.getItem('fanheat-collector-layout')||'{}');root.style.setProperty('--left-width',`${saved.left||layoutDefaults.left}px`);root.style.setProperty('--right-width',`${saved.right||layoutDefaults.right}px`);root.style.setProperty('--dock-height',`${saved.dock||layoutDefaults.dock}px`)}catch{}}
 function saveLayout(){localStorage.setItem('fanheat-collector-layout',JSON.stringify({left:parseInt(getComputedStyle(root).getPropertyValue('--left-width')),right:parseInt(getComputedStyle(root).getPropertyValue('--right-width')),dock:parseInt(getComputedStyle(root).getPropertyValue('--dock-height'))}))}
@@ -1800,7 +2013,9 @@ function activateSetupTab(panelId){document.querySelectorAll('[data-setup-tab]')
 document.querySelectorAll('[data-setup-tab]').forEach(button=>button.addEventListener('click',()=>activateSetupTab(button.dataset.setupTab)));
 activateSetupTab(localStorage.getItem('fanheat-collector-setup-tab')==='ai-settings-panel'?'ai-settings-panel':'collection-settings-panel');
 const esc=value=>String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
-const sourceLabels={youtube:'YouTube',x:'X',news:'News/RSS'};
+const sourceLabels={youtube:'YouTube',tiktok:'TikTok',x:'X',news:'News/RSS'};
+$('source').insertAdjacentHTML('beforeend','<option value="tiktok">TikTok</option>');
+$('source-menu').querySelector('[data-source-value="x"]').insertAdjacentHTML('beforebegin','<button type="button" role="option" data-source-value="tiktok" aria-selected="false"><span class="source-logo tiktok" aria-hidden="true">♪</span><span>TikTok</span></button>');
 function currentSource(){return $('source').value}
 const sourcePicker=$('source-picker'),sourceTrigger=$('source-trigger'),sourceMenu=$('source-menu');
 function setSourceMenuOpen(open){sourcePicker.classList.toggle('open',open);sourceMenu.hidden=!open;sourceTrigger.setAttribute('aria-expanded',String(open));if(open){const selected=sourceMenu.querySelector('[aria-selected="true"]')||sourceMenu.querySelector('[role="option"]');selected?.focus()}}
@@ -1814,23 +2029,28 @@ function inferLogSource(log){const text=`${log.command||''} ${log.type||''}`.toL
 const savedSource=localStorage.getItem('fanheat-collector-source');if(savedSource&&sourceLabels[savedSource])$('source').value=savedSource;
 function initializeNewsDateRange(){const end=new Date(),start=new Date();start.setDate(start.getDate()-6);let saved={};try{saved=JSON.parse(localStorage.getItem('fanheat-news-collection-range')||'{}')}catch{}$('news-date-start').value=saved.start||localDateValue(start);$('news-date-end').value=saved.end||localDateValue(end)}
 initializeNewsDateRange();
+function initializeYoutubeDateRange(){const end=new Date(),start=new Date();start.setDate(start.getDate()-6);let saved={};try{saved=JSON.parse(localStorage.getItem('fanheat-youtube-collection-range')||'{}')}catch{}$('youtube-date-start').value=saved.start||localDateValue(start);$('youtube-date-end').value=saved.end||localDateValue(end);$('youtube-period').value=saved.period||'24'}
+function syncYoutubePeriod(){const isTikTok=currentSource()==='tiktok';$('youtube-period').closest('.field').hidden=currentSource()!=='youtube';$('order').disabled=isTikTok;$('region').disabled=isTikTok;$('youtube-custom-date-range').hidden=currentSource()!=='youtube'||$('youtube-period').value!=='custom';if(isTikTok){$('media-tab-label').textContent='최근 발견 TikTok 영상';$('reload-media').textContent='TikTok 목록 새로고침'}}
+function saveYoutubeCollectionRange(){localStorage.setItem('fanheat-youtube-collection-range',JSON.stringify({period:$('youtube-period').value,start:$('youtube-date-start').value,end:$('youtube-date-end').value}));syncYoutubePeriod();preview()}
+initializeYoutubeDateRange();
 let newsSources=[];
 function newsSourcePayload(){return newsSources.map(source=>({name:String(source.name||'').trim(),domains:String(source.domains||'').split(',').map(value=>value.trim().toLowerCase().replace(/^www[.]/,'')).filter(Boolean),source_url:String(source.source_url||'').trim()||null,rss_url:String(source.rss_url||'').trim()||null,enabled:source.enabled!==false,allow_thumbnail_preview:Boolean(source.allow_thumbnail_preview)})).filter(source=>source.name&&source.domains.length)}
 function renderNewsSources(){const list=$('news-source-list');list.innerHTML=newsSources.length?newsSources.map((source,index)=>`<article class="news-source-row" data-news-index="${index}"><input type="text" data-news-field="name" value="${esc(source.name||'')}" placeholder="언론사명" aria-label="언론사명"><input type="text" data-news-field="domains" value="${esc(Array.isArray(source.domains)?source.domains.join(', '):source.domains||'')}" placeholder="도메인 (예: example.com)" aria-label="허용 도메인"><input class="rss" type="url" data-news-field="source_url" value="${esc(source.source_url||'')}" placeholder="뉴스 목록·연예 섹션 HTTPS 주소 (OpenGraph 수집 시작점)" aria-label="OpenGraph 수집 시작 주소"><input class="rss" type="url" data-news-field="rss_url" value="${esc(source.rss_url||'')}" placeholder="RSS HTTPS 주소 (선택)" aria-label="RSS 주소"><div class="news-source-checks"><label><input type="checkbox" data-news-field="enabled" ${source.enabled!==false?'checked':''}> 수집 사용</label><label><input type="checkbox" data-news-field="allow_thumbnail_preview" ${source.allow_thumbnail_preview?'checked':''}> RSS/API·OpenGraph 썸네일 허용</label></div><button type="button" class="news-source-remove" data-remove-news-source="${index}" aria-label="${esc(source.name||'언론사')} 삭제">× 삭제</button></article>`).join(''):'<div class="news-source-empty">등록 전에는 서버에 설정된 기존 News/RSS 소스를 사용합니다. 언론사를 추가하면 허용 목록 방식으로 전환됩니다.</div>';preview()}
 $('add-news-source').addEventListener('click',()=>{newsSources.push({name:'',domains:'',source_url:'',rss_url:'',enabled:true,allow_thumbnail_preview:false});renderNewsSources();$('news-source-list').querySelector('[data-news-index]:last-child input')?.focus()});
 $('news-source-list').addEventListener('input',event=>{const row=event.target.closest('[data-news-index]'),field=event.target.dataset.newsField;if(!row||!field)return;const source=newsSources[Number(row.dataset.newsIndex)];source[field]=event.target.type==='checkbox'?event.target.checked:event.target.value;preview()});
 $('news-source-list').addEventListener('click',event=>{const button=event.target.closest('[data-remove-news-source]');if(!button)return;newsSources.splice(Number(button.dataset.removeNewsSource),1);renderNewsSources()});
-function updateSourceContext(){const source=currentSource(),label=sourceLabels[source]||source,isX=source==='x',isNews=source==='news';syncSourcePicker();$('media-tab-label').textContent=isX?'최근 수집 X 포스트':isNews?'최근 수집 뉴스':'최근 수집 YouTube 미디어';$('reload-media').textContent=isX?'X 포스트 새로고침':isNews?'뉴스 새로고침':'미디어 새로고침';document.querySelectorAll('.direct-search-setting').forEach(field=>field.hidden=isX);document.querySelectorAll('.relative-time-setting').forEach(field=>field.hidden=isX||isNews);$('x-drive-settings').hidden=!isX;$('news-date-range').hidden=!isNews;$('news-recommendations').hidden=false;$('news-source-settings').hidden=!isNews;[$('job-source-label'),$('console-source-label')].forEach(item=>{item.textContent=label;item.classList.toggle('x',isX)});localStorage.setItem('fanheat-collector-source',source)}
+function updateSourceContext(){const source=currentSource(),label=sourceLabels[source]||source,isX=source==='x',isNews=source==='news';syncSourcePicker();$('media-tab-label').textContent=isX?'최근 수집 X 포스트':isNews?'최근 수집 뉴스':'최근 수집 YouTube 미디어';$('reload-media').textContent=isX?'X 포스트 새로고침':isNews?'뉴스 새로고침':'미디어 새로고침';document.querySelectorAll('.direct-search-setting').forEach(field=>field.hidden=isX);document.querySelectorAll('.relative-time-setting').forEach(field=>field.hidden=isX||isNews);$('x-drive-settings').hidden=!isX;$('news-date-range').hidden=!isNews;$('news-recommendations').hidden=false;$('news-source-settings').hidden=!isNews;syncYoutubePeriod();[$('job-source-label'),$('console-source-label')].forEach(item=>{item.textContent=label;item.classList.toggle('x',isX)});localStorage.setItem('fanheat-collector-source',source)}
 function updateSourceCapability(){const source=currentSource(),capability=sourceCapabilities[source]||{},ready=capability.configured!==false,warning=$('source-warning'),notice=capability.notice||'';warning.hidden=ready&&!notice;warning.textContent=!ready?`${sourceLabels[source]} 수집 연결이 준비되지 않았습니다.`:notice;if(!ready){$('run').disabled=true;$('run-all').disabled=true}else if(!aiPipelineRunning){$('run').disabled=false;$('run-all').disabled=false}}
 async function loadSourceCapabilities(){sourceCapabilities=await api('/admin/api/source-capabilities');updateSourceCapability()}
 updateSourceContext();
-function payload(){const source=$('source').value,collectionDate=$('filter-end')?.value||localDateValue(new Date()),isNews=source==='news';if(source==='x')return{source,queries:[...tags],collection_date:collectionDate,include_trending_idols:$('include-trending-idols').checked};return{source,queries:[...tags],max_results:Number($('max').value),order:$('order').value,published_within_hours:isNews?null:($('hours').value?Number($('hours').value):null),published_from:isNews?$('news-date-start').value:null,published_to:isNews?$('news-date-end').value:null,region_code:$('region').value,language_code:$('language').value,language_filter_mode:$('language-filter-mode').value,news_sources:isNews?newsSourcePayload():[],include_trending_idols:$('include-trending-idols').checked}}
-function collectionWindowPreview(p){if(p.source==='news'&&p.published_from&&p.published_to){const endExclusive=new Date(new Date(`${p.published_to}T00:00:00+09:00`).getTime()+86400000);return{published_after:new Date(`${p.published_from}T00:00:00+09:00`).toISOString(),published_before:endExclusive.toISOString()}}if(p.published_within_hours)return{published_after:`<UTC now - ${p.published_within_hours} hours>`};return{}}
+function payload(){const source=$('source').value,collectionDate=$('filter-end')?.value||localDateValue(new Date()),isNews=source==='news',isVideo=source==='youtube'||source==='tiktok',customVideo=isVideo&&$('youtube-period').value==='custom';if(source==='tiktok')return{source,queries:[...tags],max_results:Number($('max').value),order:'relevance',published_within_hours:null,language_code:$('language').value,language_filter_mode:$('language-filter-mode').value,include_trending_idols:$('include-trending-idols').checked};if(source==='x')return{source,queries:[...tags],collection_date:collectionDate,include_trending_idols:$('include-trending-idols').checked};return{source,queries:[...tags],max_results:Number($('max').value),order:$('order').value,published_within_hours:isNews||customVideo?null:Number($('youtube-period').value),published_from:isNews?$('news-date-start').value:customVideo?$('youtube-date-start').value:null,published_to:isNews?$('news-date-end').value:customVideo?$('youtube-date-end').value:null,region_code:$('region').value,language_code:$('language').value,language_filter_mode:$('language-filter-mode').value,news_sources:isNews?newsSourcePayload():[],include_trending_idols:$('include-trending-idols').checked}}
+function collectionWindowPreview(p){if(p.published_from&&p.published_to){const endExclusive=new Date(new Date(`${p.published_to}T00:00:00+09:00`).getTime()+86400000);return{published_after:new Date(`${p.published_from}T00:00:00+09:00`).toISOString(),published_before:endExclusive.toISOString()}}if(p.published_within_hours)return{published_after:`<UTC now - ${p.published_within_hours} hours>`};return{}}
 function preview(){const p=payload(), body={source:p.source,query:p.query,max_results:p.max_results,order:p.order,...collectionWindowPreview(p)};$('command').textContent=`curl -X POST http://localhost:8080/v1/collections \\\n  -H 'X-FANHEAT-API-KEY: $FANHEAT_INTERNAL_API_KEY' \\\n  -H 'Content-Type: application/json' \\\n  -d '${JSON.stringify(body)}'`}
 document.querySelectorAll('input,select').forEach(el=>el.addEventListener('input',preview));preview();
 $('news-date-start').addEventListener('change',saveNewsCollectionRange);$('news-date-end').addEventListener('change',saveNewsCollectionRange);
+$('youtube-period').addEventListener('change',saveYoutubeCollectionRange);$('youtube-date-start').addEventListener('change',saveYoutubeCollectionRange);$('youtube-date-end').addEventListener('change',saveYoutubeCollectionRange);
 function saveNewsCollectionRange(){localStorage.setItem('fanheat-news-collection-range',JSON.stringify({start:$('news-date-start').value,end:$('news-date-end').value}));preview()}
-function validateCollectionRange(){if(currentSource()!=='news')return true;const start=$('news-date-start').value,end=$('news-date-end').value;if(!start||!end){$('status').className='status failed';$('status').textContent='뉴스 수집 시작일과 종료일을 모두 입력하세요.';return false}if(start>end){$('status').className='status failed';$('status').textContent='뉴스 수집 시작일은 종료일보다 늦을 수 없습니다.';return false}saveNewsCollectionRange();return true}
+function validateCollectionRange(){if(currentSource()==='tiktok')return true;const source=currentSource(),customVideo=(source==='youtube'||source==='tiktok')&&$('youtube-period').value==='custom';if(source!=='news'&&!customVideo)return true;const start=source==='news'?$('news-date-start').value:$('youtube-date-start').value,end=source==='news'?$('news-date-end').value:$('youtube-date-end').value,label=sourceLabels[source];if(!start||!end){$('status').className='status failed';$('status').textContent=`${label} 수집 시작일과 종료일을 모두 입력하세요.`;return false}if(start>end){$('status').className='status failed';$('status').textContent=`${label} 수집 시작일은 종료일보다 늦을 수 없습니다.`;return false}if(source==='tiktok'&&(new Date(end)-new Date(start))/86400000>=30){$('status').className='status failed';$('status').textContent='TikTok 사용자 지정 수집 기간은 최대 30일입니다.';return false}source==='news'?saveNewsCollectionRange():saveYoutubeCollectionRange();return true}
 function renderTags(){$('tags').innerHTML=tags.map((tag,index)=>`<span class="tag">${esc(tag)}<button type="button" data-index="${index}" aria-label="${esc(tag)} 삭제">×</button></span>`).join('');preview()}
 async function saveTags(){await api(`/admin/api/queries/${$('source').value}`,{method:'PUT',body:JSON.stringify({queries:tags})})}
 async function loadTags(){const data=await api(`/admin/api/queries/${$('source').value}`);tags=data.queries;renderTags()}
@@ -1885,7 +2105,9 @@ function includeTodayInFilter(){let changed=false;if(!$('filter-end').value||$('
 $('apply-date-filter').addEventListener('click',()=>{document.querySelectorAll('[data-date-range]').forEach(button=>button.classList.remove('active'));applyDateFilter()});$('reset-date-filter').addEventListener('click',()=>{$('filter-start').value='';$('filter-end').value='';document.querySelectorAll('[data-date-range]').forEach(button=>button.classList.remove('active'));applyDateFilter()});
 document.querySelectorAll('[data-date-range]').forEach(button=>button.addEventListener('click',()=>{const range=button.dataset.dateRange,start=new Date(),end=new Date();if(range[0]==='d')start.setDate(start.getDate()-(Number(range.slice(1))-1));else if(range[0]==='m')start.setMonth(start.getMonth()-Number(range.slice(1)));else start.setFullYear(start.getFullYear()-Number(range.slice(1)));$('filter-start').value=localDateValue(start);$('filter-end').value=localDateValue(end);document.querySelectorAll('[data-date-range]').forEach(item=>item.classList.toggle('active',item===button));applyDateFilter()}));
 function emptyCollectionHint(source,total,pending,failed){if(source!=='news'||total||pending||failed)return'';const capability=sourceCapabilities.news||{};if(capability.provider==='rss')return'국내 뉴스 검색 API가 없어 RSS만 조회했습니다. 현재 검색어와 일치하는 RSS 기사가 없습니다. NAVER_CLIENT_ID와 NAVER_CLIENT_SECRET을 설정하면 국내 뉴스 검색을 사용할 수 있습니다.';return'선택한 검색어·최근 시간·허용 언론사 조건에 맞는 뉴스가 없습니다.'}
-async function poll(ids,logId){clearTimeout(timer);try{const jobs=await Promise.all(ids.map(id=>api(`/admin/api/collections/${id}`))),completed=jobs.filter(j=>j.status==='completed').length,failed=jobs.filter(j=>j.status==='failed').length,pending=jobs.length-completed-failed,total=jobs.reduce((sum,j)=>sum+(Number(j.collected)||0),0),errors=jobs.filter(j=>j.error).map(j=>`${j.query}: ${j.error}`),emptyHint=emptyCollectionHint(currentSource(),total,pending,failed);$('status').className=`status ${failed?'failed':pending?'':emptyHint?'failed':'done'}`;$('status').innerHTML=`전체 ${jobs.length}개 · <strong>완료 ${completed}</strong> · 진행 ${pending} · 실패 ${failed} · 수집 ${total}건${emptyHint?`<br>${esc(emptyHint)}`:''}`;updateCommandLog(logId,{status:failed?'실패':pending?'진행 중':emptyHint?'완료 · 결과 없음':'완료',response:`job_ids: ${ids.join(', ')}\n완료 ${completed} · 진행 ${pending} · 실패 ${failed} · 수집 ${total}건${emptyHint?`\n안내: ${emptyHint}`:''}${errors.length?`\n오류: ${errors.join(' | ')}`:''}`,error:errors.join(String.fromCharCode(10))});if(pending){loadJobs();timer=setTimeout(()=>poll(ids,logId),1500)}else{await Promise.all([loadJobs(),loadMedia()]);$('run').disabled=false}}catch(e){$('status').textContent=e.message;updateCommandLog(logId,{status:'조회 실패',response:e.message,error:e.message});$('run').disabled=false}}
+function setCollectionRunning(ids=[],logId=''){activeCollectionIds=[...ids];activeCollectionLogId=logId;collectionTerminating=false;const running=activeCollectionIds.length>0,button=$('run');button.disabled=false;button.textContent=running?'수집 종료하기':'수집만 실행';button.classList.toggle('terminate',running);button.setAttribute('aria-label',running?'현재 수집 작업 즉시 종료':'미디어 수집만 실행')}
+async function terminateCollection(){if(!activeCollectionIds.length||collectionTerminating)return;collectionTerminating=true;const button=$('run');button.disabled=true;button.textContent='종료 요청 중…';$('status').className='status';$('status').textContent=`수집 작업 ${activeCollectionIds.length}개를 종료하고 있습니다…`;clearTimeout(timer);try{const result=await api('/admin/api/collections/cancel',{method:'POST',body:JSON.stringify({job_ids:activeCollectionIds})});updateCommandLog(activeCollectionLogId,{status:'관리자 종료',response:result.message});$('status').className='status failed';$('status').textContent=`${result.message} 실행 중인 API 요청과 대기 작업을 중단했습니다.`;setCollectionRunning();await Promise.all([loadJobs(),loadMedia()])}catch(e){$('status').className='status failed';$('status').textContent=e.message;button.disabled=false;button.textContent='수집 종료하기';collectionTerminating=false}}
+async function poll(ids,logId){clearTimeout(timer);try{const jobs=await Promise.all(ids.map(id=>api(`/admin/api/collections/${id}`))),completed=jobs.filter(j=>j.status==='completed').length,failed=jobs.filter(j=>j.status==='failed').length,cancelled=jobs.filter(j=>j.status==='cancelled').length,pending=jobs.length-completed-failed-cancelled,total=jobs.reduce((sum,j)=>sum+(Number(j.collected)||0),0),errors=jobs.filter(j=>j.error&&j.status!=='cancelled').map(j=>`${j.query}: ${j.error}`),emptyHint=emptyCollectionHint(currentSource(),total,pending,failed);$('status').className=`status ${failed||cancelled?'failed':pending?'':emptyHint?'failed':'done'}`;$('status').innerHTML=`전체 ${jobs.length}개 · <strong>완료 ${completed}</strong> · 진행 ${pending} · 종료 ${cancelled} · 실패 ${failed} · 수집 ${total}건${emptyHint?`<br>${esc(emptyHint)}`:''}`;updateCommandLog(logId,{status:cancelled?'관리자 종료':failed?'실패':pending?'진행 중':emptyHint?'완료 · 결과 없음':'완료',response:`job_ids: ${ids.join(', ')}\n완료 ${completed} · 진행 ${pending} · 종료 ${cancelled} · 실패 ${failed} · 수집 ${total}건${emptyHint?`\n안내: ${emptyHint}`:''}${errors.length?`\n오류: ${errors.join(' | ')}`:''}`,error:errors.join(String.fromCharCode(10))});if(pending){loadJobs();timer=setTimeout(()=>poll(ids,logId),1500)}else{setCollectionRunning();await Promise.all([loadJobs(),loadMedia()])}}catch(e){$('status').textContent=e.message;updateCommandLog(logId,{status:'조회 실패',response:e.message,error:e.message});setCollectionRunning()}}
 async function loadJobs(){try{const source=currentSource(),jobs=await loadAllPages(`/admin/api/collections?source=${encodeURIComponent(source)}`);$('job-result').textContent=`${jobs.length}개`;$('jobs').innerHTML=jobs.map(j=>`<article class="job-item"><header><strong>${esc(j.query)}</strong><span>${esc(j.status)}</span></header><small>${esc(sourceLabels[j.source]||j.source)} · 수집 ${Number(j.collected)||0}건</small><small>${j.started_at?esc(new Date(j.started_at).toLocaleString()):'-'}</small></article>`).join('')||`<p class="result">선택한 기간의 ${esc(sourceLabels[source])} 작업이 없습니다.</p>`}catch(e){$('job-result').textContent='';$('jobs').innerHTML=`<p class="result">${esc(e.message)}</p>`}}
 function updateMediaSelection(){const count=selectedMedia.size,selectedRows=visibleMedia.filter(row=>selectedMedia.has(String(row.id))),allDraftable=Boolean(count)&&count<=50&&selectedRows.length===count&&selectedRows.every(row=>!row.draft_status);$('media-selection').textContent=count?`${count}개 선택${allDraftable?' · AI 초안 생성 가능':' · 삭제 가능'}`:'0개 선택';$('draft-selected-media').disabled=!allDraftable;$('draft-selected-media').title=allDraftable?'선택한 미디어로 AI 초안을 생성합니다.':'AI 초안이 없는 미디어만 한 번에 최대 50개까지 생성할 수 있습니다.';$('delete-selected-media').disabled=!count;$('select-all-media').textContent=count&&count===visibleMedia.length?'전체 선택 해제':'전체 선택'}
 const mediaStatusLabels={unprocessed:'미처리',generated:'검수 대기',review:'검수 대기',approved:'승인됨',scheduled:'발행 예약',published:'발행됨',rejected:'반려됨',failed:'실패'};
@@ -1921,7 +2143,7 @@ $('select-all-drafts').addEventListener('click',()=>{const select=selectedDrafts
 async function runBulk(action){const ids=[...selectedDrafts];if(!ids.length)return;let reason='';if(action==='reject'){reason=await requestRejectionReason(ids.length);if(!reason)return}if(action==='delete'&&!confirm(`선택한 ${ids.length}개 초안을 삭제할까요? 발행 완료 초안은 보호됩니다.`))return;const button=$(action==='approve'?'bulk-approve':action==='reject'?'bulk-reject':'bulk-delete');button.disabled=true;$('ai-result').textContent=`${ids.length}개 처리 중…`;const results=await Promise.allSettled(ids.map(id=>api(`/admin/api/ai/drafts/${id}${action==='approve'?'/approve':action==='reject'?'/reject':''}`,{method:action==='delete'?'DELETE':'POST',...(action==='reject'?{body:JSON.stringify({reason})}:action==='approve'?{body:JSON.stringify({approval_source:'admin_bulk'})}:{body:'{}'})})));const failed=results.filter(r=>r.status==='rejected').length;await loadDrafts();$('status').className=`status ${failed?'failed':'done'}`;$('status').textContent=`선택 초안 ${ids.length-failed}개 처리 완료${failed?` · ${failed}개 실패`:''}`}
 $('bulk-approve').addEventListener('click',()=>runBulk('approve'));$('bulk-reject').addEventListener('click',()=>runBulk('reject'));$('bulk-delete').addEventListener('click',()=>runBulk('delete'));
 $('bulk-publish').addEventListener('click',()=>{const ids=[...selectedDrafts];if(ids.length&&confirm(`선택한 승인 초안 ${ids.length}개를 FANHEAT 사용자 피드에 게시할까요?`))publishDrafts(ids,$('bulk-publish'))});
-$('form').addEventListener('submit',async e=>{e.preventDefault();const isX=currentSource()==='x';if(!isX&&!tags.length){$('status').className='status failed';$('status').textContent='검색어 태그를 하나 이상 추가하세요.';return}if(!validateCollectionRange())return;includeTodayInFilter();$('run').disabled=true;$('status').textContent=isX?'Google Drive에서 X 포스트를 가져오는 중입니다…':`${tags.length}개 작업을 등록하는 중입니다…`;const logId=addCommandLog('수집만 실행',commandPreview);try{if(!isX)await Promise.all([saveTags(),saveLocale()]);const result=await api('/admin/api/collections',{method:'POST',body:JSON.stringify(payload())});updateCommandLog(logId,{status:'접수됨',response:`HTTP 202\n${result.message||`job_ids: ${(result.job_ids||[]).join(', ')}`}`});if(isX){$('status').className='status done';$('status').textContent=result.message;setTimeout(()=>Promise.all([loadJobs(),loadMedia()]),5000);$('run').disabled=false}else poll(result.job_ids,logId)}catch(err){$('status').className='status failed';$('status').textContent=err.message;updateCommandLog(logId,{status:'요청 실패',response:err.message,error:err.message});$('run').disabled=false}});loadTags().catch(e=>$('status').textContent=e.message);loadLocale().catch(e=>$('status').textContent=e.message);loadNewsRecommendations();loadJobs();
+$('form').addEventListener('submit',async e=>{e.preventDefault();if(activeCollectionIds.length){await terminateCollection();return}const isX=currentSource()==='x';if(!isX&&!tags.length){$('status').className='status failed';$('status').textContent='검색어 태그를 하나 이상 추가하세요.';return}if(!validateCollectionRange())return;includeTodayInFilter();$('run').disabled=true;$('status').textContent=isX?'Google Drive에서 X 포스트를 가져오는 중입니다…':`${tags.length}개 작업을 등록하는 중입니다…`;const logId=addCommandLog('수집만 실행',commandPreview);try{if(!isX)await Promise.all([saveTags(),saveLocale()]);const result=await api('/admin/api/collections',{method:'POST',body:JSON.stringify(payload())});updateCommandLog(logId,{status:'접수됨',response:`HTTP 202\n${result.message||`job_ids: ${(result.job_ids||[]).join(', ')}`}`});if(isX){$('status').className='status done';$('status').textContent=result.message;setTimeout(()=>Promise.all([loadJobs(),loadMedia()]),5000);setCollectionRunning()}else{setCollectionRunning(result.job_ids||[],logId);poll(result.job_ids||[],logId)}}catch(err){$('status').className='status failed';$('status').textContent=err.message;updateCommandLog(logId,{status:'요청 실패',response:err.message,error:err.message});setCollectionRunning()}});loadTags().catch(e=>$('status').textContent=e.message);loadLocale().catch(e=>$('status').textContent=e.message);loadNewsRecommendations();loadJobs();
 $('run-all').addEventListener('click',async()=>{const isX=currentSource()==='x';if(!isX&&!tags.length){$('status').className='status failed';$('status').textContent='검색어 태그를 하나 이상 추가하세요.';return}if(!validateCollectionRange())return;includeTodayInFilter();const button=$('run-all');button.disabled=true;$('status').className='status';$('status').textContent=isX?'Google Sheet X 포스트 수집 및 AI 초안을 요청하는 중입니다…':'n8n 전체 자동화를 요청하는 중입니다…';const logId=addCommandLog('n8n 전체 자동화',`POST /admin/api/automation\n${JSON.stringify(payload(),null,2)}`);try{if(!isX)await Promise.all([saveTags(),saveLocale()]);const result=await api('/admin/api/automation',{method:'POST',body:JSON.stringify(payload())});$('status').className='status done';$('status').innerHTML=`<strong>n8n 실행 요청 완료</strong> · ${esc(result.message)}`;updateCommandLog(logId,{status:'n8n 접수됨',response:`HTTP 202\n${result.message}`});setTimeout(()=>{loadJobs();loadMedia();loadDrafts()},6000)}catch(err){$('status').className='status failed';$('status').textContent=err.message;updateCommandLog(logId,{status:'요청 실패',response:err.message,error:err.message})}finally{button.disabled=false}});
 loadSourceCapabilities().catch(e=>$('status').textContent=e.message);loadMedia();loadDrafts();loadN8nStatus();
 </script></body></html>"""

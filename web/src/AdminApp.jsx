@@ -8,6 +8,7 @@ import {
   loadAdminArtistDetail,
   loadAdminArtists,
   loadAdminComments,
+  loadAdminCopyrightReports,
   loadAdminDashboard,
   loadAdminFanPhotos,
   loadAdminMembers,
@@ -18,6 +19,7 @@ import {
   updateAdminMember,
 } from './lib/admin-api'
 import { AlbumDetailPage, ArtistDetailPage, ArtistsPanel, CommentsPanel, PostsPanel } from './AdminContentPanels'
+import CopyrightReportsPanel from './CopyrightReportsPanel'
 
 const ADMIN_ACCOUNT_EMAILS = {
   admin1: 'jh.park@illunex.com',
@@ -30,6 +32,7 @@ const sections = [
   ['artists', '/admin/artists', '아티스트 관리'],
   ['posts', '/admin/posts', '포스트 관리'],
   ['comments', '/admin/comments', '댓글 관리'],
+  ['copyright', '/admin/copyright-reports', '저작권 신고'],
   ['fan-photos', '/admin/fan-photos', '팬 사진 검토'],
 ]
 
@@ -154,7 +157,7 @@ export default function AdminApp() {
     if (!isAdminUser(user)) return
     setBusy(true); setError(''); if (message) setNotice(message)
     try {
-      const next = section === 'dashboard' ? await loadAdminDashboard() : section === 'members' ? await loadAdminMembers(memberQuery) : section === 'hero' ? await loadAdminHeroSlides() : section === 'artists' ? albumId ? await loadAdminAlbumDetail(albumId) : artistId ? await loadAdminArtistDetail(artistId) : await loadAdminArtists() : section === 'posts' ? await Promise.all([loadAdminPosts(), loadAdminArtists()]).then(([posts, artists]) => ({ posts, artists })) : section === 'comments' ? await loadAdminComments() : await loadAdminFanPhotos()
+      const next = section === 'dashboard' ? await loadAdminDashboard() : section === 'members' ? await loadAdminMembers(memberQuery) : section === 'hero' ? await loadAdminHeroSlides() : section === 'artists' ? albumId ? await loadAdminAlbumDetail(albumId) : artistId ? await loadAdminArtistDetail(artistId) : await loadAdminArtists() : section === 'posts' ? await Promise.all([loadAdminPosts(), loadAdminArtists()]).then(([posts, artists]) => ({ posts, artists })) : section === 'comments' ? await loadAdminComments() : section === 'copyright' ? await loadAdminCopyrightReports() : await loadAdminFanPhotos()
       setData(next)
     } catch (loadError) { setError(loadError.message) }
     finally { setBusy(false) }
@@ -165,5 +168,5 @@ export default function AdminApp() {
   if (user === undefined) return <main className="admin-loading">관리자 세션을 확인하고 있습니다…</main>
   if (!user) return <AdminLogin onAuthenticated={setUser} />
   if (!isAdminUser(user)) return <AccessDenied user={user} onLogout={logout} />
-  return <div className="admin-app"><aside className="admin-sidebar"><a className="admin-brand" href="/admin"><span>☆</span><strong>FAN HEAT</strong><small>ADMIN CONSOLE</small></a><nav>{sections.map(([key, href, label]) => <a className={section === key ? 'active' : ''} href={href} key={key}>{label}</a>)}</nav><div><a href="/">사용자 페이지</a><button onClick={logout}>로그아웃</button></div></aside><main className="admin-main"><header className="admin-topbar"><div><small>FANHEAT BACK OFFICE</small><h1>{title}</h1></div><span>{user.email}</span></header><section className="admin-content">{notice && <p className="admin-alert">{notice}</p>}{error && <p className="admin-alert error">{error}</p>}{section === 'members' && <form className="admin-search" onSubmit={event => { event.preventDefault(); load() }}><input value={memberQuery} onChange={event => setMemberQuery(event.target.value)} placeholder="회원 이름 또는 ID 검색" /><button>검색</button></form>}{busy && !data ? <p className="admin-loading">데이터를 불러오고 있습니다…</p> : data && (section === 'dashboard' ? <Dashboard data={data} /> : section === 'members' ? <Members rows={data} onReload={load} /> : section === 'hero' ? <HeroSlides rows={data} onReload={load} /> : section === 'artists' ? albumId ? <AlbumDetailPage initial={data} onChanged={load} /> : artistId ? <ArtistDetailPage initial={data} onChanged={load} /> : <ArtistsPanel rows={data} onReload={load} /> : section === 'posts' ? <PostsPanel rows={data.posts} artists={data.artists} onReload={load} /> : section === 'comments' ? <CommentsPanel rows={data} onReload={load} /> : <FanPhotos rows={data} onReload={load} />)}</section></main></div>
+  return <div className="admin-app"><aside className="admin-sidebar"><a className="admin-brand" href="/admin"><span>☆</span><strong>FAN HEAT</strong><small>ADMIN CONSOLE</small></a><nav>{sections.map(([key, href, label]) => <a className={section === key ? 'active' : ''} href={href} key={key}>{label}</a>)}</nav><div><a href="/">사용자 페이지</a><button onClick={logout}>로그아웃</button></div></aside><main className="admin-main"><header className="admin-topbar"><div><small>FANHEAT BACK OFFICE</small><h1>{title}</h1></div><span>{user.email}</span></header><section className="admin-content">{notice && <p className="admin-alert">{notice}</p>}{error && <p className="admin-alert error">{error}</p>}{section === 'members' && <form className="admin-search" onSubmit={event => { event.preventDefault(); load() }}><input value={memberQuery} onChange={event => setMemberQuery(event.target.value)} placeholder="회원 이름 또는 ID 검색" /><button>검색</button></form>}{busy && !data ? <p className="admin-loading">데이터를 불러오고 있습니다…</p> : data && (section === 'dashboard' ? <Dashboard data={data} /> : section === 'members' ? <Members rows={data} onReload={load} /> : section === 'hero' ? <HeroSlides rows={data} onReload={load} /> : section === 'artists' ? albumId ? <AlbumDetailPage initial={data} onChanged={load} /> : artistId ? <ArtistDetailPage initial={data} onChanged={load} /> : <ArtistsPanel rows={data} onReload={load} /> : section === 'posts' ? <PostsPanel rows={data.posts} artists={data.artists} onReload={load} /> : section === 'comments' ? <CommentsPanel rows={data} onReload={load} /> : section === 'copyright' ? <CopyrightReportsPanel rows={data} user={user} onReload={load} /> : <FanPhotos rows={data} onReload={load} />)}</section></main></div>
 }

@@ -19,6 +19,7 @@ def test_youtube_search_is_enriched_with_statistics():
                 "thumbnails": {"high": {"url": "https://example.com/thumb.jpg"}},
             },
             "statistics": {"viewCount": "100", "likeCount": "9", "commentCount": "3"},
+            "status": {"privacyStatus": "public", "embeddable": True},
         }]})
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
@@ -34,3 +35,59 @@ def test_youtube_search_is_enriched_with_statistics():
     assert requests[0].url.params["maxResults"] == "50"
     assert requests[0].url.params["regionCode"] == "KR"
     assert requests[0].url.params["relevanceLanguage"] == "ko"
+    assert requests[0].url.params["videoEmbeddable"] == "true"
+    assert requests[1].url.params["part"] == "snippet,statistics,status"
+
+
+def test_youtube_excludes_public_video_when_owner_disables_embedding():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/search"):
+            return httpx.Response(200, json={"items": [
+                {"id": {"videoId": "allowed"}, "snippet": {}},
+                {"id": {"videoId": "blocked"}, "snippet": {}},
+            ]})
+        return httpx.Response(200, json={"items": [
+            {
+                "id": "allowed",
+                "snippet": {
+                    "channelTitle": "FANHEAT", "title": "Allowed", "description": "",
+                    "publishedAt": "2026-08-28T01:00:00Z",
+                },
+                "statistics": {},
+                "status": {"privacyStatus": "public", "embeddable": True},
+            },
+            {
+                "id": "blocked",
+                "snippet": {
+                    "channelTitle": "FANHEAT", "title": "Blocked", "description": "",
+                    "publishedAt": "2026-08-28T01:00:00Z",
+                },
+                "statistics": {},
+                "status": {"privacyStatus": "public", "embeddable": False},
+            },
+        ]})
+
+    page = YouTubeConnector(
+        "test-key", client=httpx.Client(transport=httpx.MockTransport(handler))
+    ).collect(CollectionRequest(source=Source.YOUTUBE, query="K-POP"))
+
+    assert [item.source_content_id for item in page.items] == ["allowed"]
+
+
+def test_youtube_excludes_private_or_missing_status_video():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/search"):
+            return httpx.Response(200, json={"items": [
+                {"id": {"videoId": "private"}, "snippet": {}},
+                {"id": {"videoId": "unknown"}, "snippet": {}},
+            ]})
+        return httpx.Response(200, json={"items": [
+            {"id": "private", "status": {"privacyStatus": "private", "embeddable": True}},
+            {"id": "unknown"},
+        ]})
+
+    page = YouTubeConnector(
+        "test-key", client=httpx.Client(transport=httpx.MockTransport(handler))
+    ).collect(CollectionRequest(source=Source.YOUTUBE, query="K-POP"))
+
+    assert page.items == []

@@ -32,6 +32,40 @@ def test_news_collection_rejects_reversed_date_range():
         )
 
 
+def test_youtube_custom_dates_become_inclusive_korean_calendar_window():
+    request = AdminCollectionRequest(
+        source=Source.YOUTUBE,
+        queries=["아이브"],
+        published_from=date(2026, 8, 1),
+        published_to=date(2026, 8, 31),
+        published_within_hours=None,
+    )
+
+    published_after, published_before = collection_window(request)
+
+    assert published_after == datetime(2026, 7, 31, 15, tzinfo=timezone.utc)
+    assert published_before == datetime(2026, 8, 31, 15, tzinfo=timezone.utc)
+
+
+def test_youtube_accepts_twelve_month_relative_window():
+    request = AdminCollectionRequest(
+        source=Source.YOUTUBE,
+        queries=["아이브"],
+        published_within_hours=8760,
+    )
+
+    assert request.published_within_hours == 8760
+
+
+def test_tiktok_rejects_more_than_thirty_days():
+    with pytest.raises(ValidationError, match="최대 30일"):
+        AdminCollectionRequest(
+            source=Source.TIKTOK,
+            queries=["아이브"],
+            published_within_hours=24 * 31,
+        )
+
+
 def test_collection_request_rejects_empty_half_open_window():
     boundary = datetime(2026, 9, 1, tzinfo=timezone.utc)
     with pytest.raises(ValidationError, match="published_after must be earlier"):

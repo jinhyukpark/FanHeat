@@ -316,7 +316,7 @@ max_frequency = "5s"
 # verify_enabled = true
 
 # Use an external OAuth provider. The full list of providers are: `apple`, `azure`, `bitbucket`,
-# `discord`, `facebook`, `github`, `gitlab`, `google`, `keycloak`, `linkedin_oidc`, `notion`, `twitch`,
+# `discord`, `facebook`, `github`, `gitlab`, `google`, `kakao`, `keycloak`, `linkedin_oidc`, `notion`, `twitch`,
 # `twitter`, `x`, `slack`, `spotify`, `workos`, `zoom`.
 [auth.external.apple]
 enabled = false
@@ -332,6 +332,16 @@ url = ""
 skip_nonce_check = false
 # If enabled, it will allow the user to successfully authenticate when the provider does not return an email address.
 email_optional = false
+
+# Kakao login is configured in the hosted Supabase Dashboard for production.
+# Uncomment this block only when testing against a local Supabase Auth instance.
+# The REST API key is the client ID; keep the Kakao Login client secret outside Git.
+# [auth.external.kakao]
+# enabled = true
+# client_id = "env(KAKAO_REST_API_KEY)"
+# secret = "env(KAKAO_CLIENT_SECRET)"
+# redirect_uri = "http://localhost:54321/auth/v1/callback"
+# email_optional = true
 
 # Allow Solana wallet holders to sign in to your project via the Sign in with Solana (SIWS, EIP-4361) standard.
 # You can configure "web3" rate limit in the [auth.rate_limit] section and set up [auth.captcha] if self-hosting.

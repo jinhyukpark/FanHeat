@@ -61,6 +61,7 @@ Collector admin은 기본적으로 n8n과 같은 `N8N_USER`/`N8N_PASSWORD`를 �
 - `fanheat-youtube-scheduled-pipeline.json`: 비활성 보관 워크플로. 사용자 실행 없이 수집·초안 생성을 시작하지 않도록 활성화하지 않습니다.
 - `fanheat-publish-approved.json`: 1분마다 예약 시각을 확인하고, 관리자 수동 승인 또는 `전체 자동화 실행`으로 정책 승인된 포스트만 8~26분의 불규칙한 간격으로 한 건씩 발행
 - `fanheat-ai-comments.json`: 5분마다 AI 댓글·답글 계획을 확인하고, 예약 시간이 지난 작업만 처리
+- `fanheat-ai-daily-votes.json`: 매시간 누락 여부를 확인하고 활성 AI 계정마다 서울 날짜 기준 하루 한 표만 생성
 - `fanheat-artist-profile-import.json`: 공식 프로필·SNS 근거, 앨범 상세·수록곡과 공식 YouTube 연결을 수집합니다. 작업 종료와 데이터 충족도를 별도로 보고합니다.
 - `fanheat-artist-scheduled-refresh.json`: 수집 완료 아티스트별 갱신 주기를 5분마다 확인하고, 갱신 시각이 된 아티스트만 공식 채널에서 다시 수집
 - 아티스트 정보 자동화는 Collector Studio의 `아티스트 정보 가져오기` 화면에서
@@ -76,6 +77,10 @@ Collector admin은 기본적으로 n8n과 같은 `N8N_USER`/`N8N_PASSWORD`를 �
 News/RSS 화면의 `수집 허용 언론사`에는 언론사명, 기사 원문 도메인, 선택 RSS HTTPS 주소를 저장할 수 있습니다. 한 곳 이상 등록하면 기사 URL의 호스트가 허용 도메인과 일치하는 결과만 수집하며, 이 목록은 관리자 전체 자동화 요청에서 n8n을 거쳐 Collector까지 전달됩니다. 기사 이미지는 갤러리로 복제하지 않습니다. 관리자가 해당 언론사의 `RSS/API·OpenGraph 썸네일 허용`을 켜면 RSS/API 이미지가 없는 경우에도 기사 원문의 `og:image` 또는 `twitter:image`를 확인해 링크 카드 미리보기 주소로 저장합니다. 기사와 썸네일은 공개 HTTPS 주소만 허용하며, 이동 후 기사 도메인도 허용 목록과 다시 대조합니다.
 
 News/RSS 수집 화면의 `뉴스 수집 시작일`과 `뉴스 수집 종료일`은 한국 시간 기준의 포함 범위입니다. 직접 수집과 관리자 전체 자동화 모두 같은 범위를 사용하며, n8n은 계산된 UTC `published_after`/`published_before` 값을 Collector에 그대로 전달합니다. Naver News Search는 기간 파라미터가 없으므로 Collector가 최신순 결과를 페이지 단위로 탐색한 뒤 선택 기간 밖의 기사를 제외합니다(검색 API가 제공하는 최대 결과 범위 내).
+
+YouTube 수집 기간은 `1일`, `1주`, `2주`, `1개월`, `3개월`, `6개월`, `12개월` 프리셋을 제공합니다. `기타 날짜 선택`은 한국 시간 기준의 포함 범위로 계산되며, 직접 수집과 관리자 전체 자동화에 동일하게 적용됩니다.
+
+TikTok은 NAVER_CLIENT_ID/SECRET의 웹문서 검색 권한으로 키워드에 맞는 공개 영상 링크를 찾고 공식 oEmbed 정보를 확인합니다. 기존 n8n 전체 자동화가 같은 수집기를 호출하며 Research API 키는 사용하지 않습니다. TikTok 검색 페이지를 크롤링하거나 영상 파일을 복제하지 않습니다. 검색 색인에 없는 영상은 발견할 수 없고 게시일·국가·조회수 정렬은 지원하지 않습니다. 저장 날짜는 발견 시각입니다. oEmbed 성공은 실제 재생 성공이나 사용 권한을 보장하지 않으므로 관리자 검수가 필요합니다. 403·429·서버 오류는 영상 삭제로 처리하지 않고 작업 오류로 표시합니다.
 
 `NAVER_CLIENT_ID`와 `NAVER_CLIENT_SECRET`이 설정된 한국 수집은 네이버 뉴스 검색 API를 우선 사용합니다. NAVER API HUB 모드는 `https://naverapihub.apigw.ntruss.com/search/v1/news`와 `X-NCP-APIGW-API-KEY-ID`/`X-NCP-APIGW-API-KEY` 헤더를 사용합니다. 네이버 응답의 `originallink`를 기사 원문으로 저장하고 그 도메인으로 언론사 허용 목록을 검사합니다. 네이버 뉴스 검색 API 응답에는 이미지 필드가 없으므로, 썸네일이 허용된 언론사는 원문 OpenGraph 정보를 보조 경로로 확인합니다.
 

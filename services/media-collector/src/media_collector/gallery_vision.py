@@ -1,14 +1,17 @@
 import base64
 import time
 from datetime import datetime, timezone
-from urllib.parse import urljoin, urlparse
+from urllib.parse import unquote, urljoin, urlparse
 import httpx
 from sqlalchemy import text
 
 
 def fetch_image(url):
     from .artist_import import _public_https_url
-    with httpx.Client(timeout=12, follow_redirects=False) as client:
+    # Wikimedia rejects anonymous/default HTTP clients with 403. Identify this
+    # bounded fetch just as the Commons metadata client does.
+    headers = {"User-Agent": "FANHEAT-Artist-Collector/1.0 (https://fanheat.com)"}
+    with httpx.Client(timeout=12, follow_redirects=False, headers=headers) as client:
         for _ in range(4):
             _public_https_url(url)
             with client.stream('GET', url) as response:
@@ -104,13 +107,30 @@ def save_gallery_candidates(db, artist_id, report):
 
 
 def representative_photo(report):
-    """Only vetted photographic candidates; never OG images/logos by position."""
+    """Only reuse-licensed Commons photos may become automatic profile artwork."""
+    non_portrait_markers = {
+        'advertisement', 'advertisment', 'album_cover', 'cover)', 'cover.',
+        'fileicon-', 'logo', 'repackage', 'rice_wreath', 'title_card',
+        'timeline',
+    }
+
+    def looks_like_portrait(item):
+        searchable = unquote(' '.join(str(item.get(key) or '') for key in (
+            'image_url', 'original_image_url', 'source_url', 'title',
+        ))).lower().replace(' ', '_')
+        return not any(marker in searchable for marker in non_portrait_markers)
+
     candidates = [item for item in report.get('items', [])
                   if item.get('decision') == 'photo_candidate'
                   and item.get('category') in {'photoshoot', 'activity_photo'}
                   and item.get('people_visible') is True
                   and item.get('promotional_layout') is False
                   and item.get('confidence', 0) >= .85
-                  and item.get('source_url') and item.get('image_url')]
+                  and item.get('source_provider') == 'wikimedia_commons'
+                  and item.get('creator_name')
+                  and item.get('license_name')
+                  and item.get('license_url')
+                  and item.get('source_url') and item.get('image_url')
+                  and looks_like_portrait(item)]
     candidates.sort(key=lambda item: (item['category'] == 'photoshoot', item['confidence']), reverse=True)
     return candidates[0] if candidates else None

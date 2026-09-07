@@ -291,6 +291,7 @@ def build_trending_idol_recommendations(
         ranked.append(
             {
                 "id": artist.get("id"),
+                "slug": artist.get("slug"),
                 "name": name,
                 "aliases": list(dict.fromkeys(str(alias).strip() for alias in raw_aliases if str(alias or "").strip())),
                 "score": score,
@@ -298,6 +299,7 @@ def build_trending_idol_recommendations(
                 "activity_keywords": activity[:2],
                 "visitor_today": visitor_today,
                 "follower_count": follower_count,
+                "discovered_from": artist.get("discovered_from") or "fanheat",
             }
         )
 
@@ -358,14 +360,28 @@ def trending_idol_recommendations(
     ).mappings().all()
     candidate_result = build_trending_idol_recommendations(artists, media_items, artist_limit=40)
     settings = get_settings()
-    discovery = {"status": "not_needed", "artists": [], "article_count": 0}
-    if not candidate_result["artists"]:
-        discovery = discover_naver_kpop_candidates(
-            client_id=settings.naver_client_id,
-            client_secret=settings.naver_client_secret,
-            provider=settings.naver_api_provider,
-        )
-        candidate_result["artists"] = discovery["artists"]
+    # News discovery is additive: limiting it to an empty FANHEAT catalog would
+    # prevent newly trending, not-yet-registered artists from ever appearing.
+    discovery = discover_naver_kpop_candidates(
+        client_id=settings.naver_client_id,
+        client_secret=settings.naver_client_secret,
+        provider=settings.naver_api_provider,
+    )
+    merged: dict[str, dict[str, Any]] = {}
+    for artist in [*candidate_result["artists"], *discovery["artists"]]:
+        key = _search_text(artist.get("name"))
+        if not key:
+            continue
+        if key not in merged:
+            merged[key] = dict(artist)
+            continue
+        current = merged[key]
+        current["aliases"] = list(dict.fromkeys([*(current.get("aliases") or []), *(artist.get("aliases") or [])]))
+        current["recent_mentions"] = max(int(current.get("recent_mentions") or 0), int(artist.get("recent_mentions") or 0))
+        current["activity_keywords"] = list(dict.fromkeys([*(current.get("activity_keywords") or []), *(artist.get("activity_keywords") or [])]))[:2]
+        if artist.get("discovered_from") == "naver_news":
+            current["naver_news_discovered"] = True
+    candidate_result["artists"] = list(merged.values())
     trend_candidates = [
         {"name": artist["name"], "aliases": artist["aliases"]} for artist in candidate_result["artists"]
     ]

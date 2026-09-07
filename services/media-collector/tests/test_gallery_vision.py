@@ -6,11 +6,25 @@ from media_collector.artist_import import ArtistPageParser, collect_gallery_page
 
 
 def test_representative_requires_verified_photo_and_prefers_portrait():
-    photo = {'decision':'photo_candidate','category':'activity_photo','people_visible':True,'promotional_layout':False,'confidence':.95,'source_url':'https://official.test/profile','image_url':'https://official.test/activity.jpg'}
-    portrait = photo | {'category':'photoshoot','image_url':'https://official.test/portrait.jpg'}
+    photo = {'decision':'photo_candidate','category':'activity_photo','people_visible':True,
+             'promotional_layout':False,'confidence':.95,
+             'source_provider':'wikimedia_commons','creator_name':'Example Photographer',
+             'license_name':'CC BY-SA 4.0','license_url':'https://creativecommons.org/licenses/by-sa/4.0/',
+             'source_url':'https://commons.wikimedia.org/wiki/File:Activity.jpg',
+             'image_url':'https://upload.wikimedia.org/activity.jpg'}
+    portrait = photo | {'category':'photoshoot','image_url':'https://upload.wikimedia.org/portrait.jpg'}
     assert representative_photo({'items':[photo,portrait]}) == portrait
-    for change in [{'category':'logo'},{'promotional_layout':True},{'people_visible':False},{'confidence':.4},{'decision':'review'}]:
+    for change in [{'category':'logo'},{'promotional_layout':True},{'people_visible':False},
+                   {'confidence':.4},{'decision':'review'},{'source_provider':'official_site'},
+                   {'creator_name':None},{'license_name':None},{'license_url':None}]:
         assert representative_photo({'items':[photo | change]}) is None
+    for image_url in (
+        'https://upload.wikimedia.org/album_cover.jpg',
+        'https://upload.wikimedia.org/group_timeline.png',
+        'https://upload.wikimedia.org/fileicon-ogg.png',
+        'https://upload.wikimedia.org/mobile_advertisement.jpg',
+    ):
+        assert representative_photo({'items':[photo | {'image_url':image_url}]}) is None
 
 
 def test_model_failure_never_accepts_image(monkeypatch):

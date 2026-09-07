@@ -5,6 +5,7 @@ unmatched recordings remain explicit review gaps, never invented metadata.
 """
 import re
 import unicodedata
+from html import unescape
 from datetime import date
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse
 
@@ -95,6 +96,7 @@ def profile_and_news(pages, aliases, settings, logs):
     for page in pages:
         host = (urlparse(page['url']).hostname or '').removeprefix('www.')
         if host in platforms:
+            socials.setdefault(platforms[host], {'url': page['url'], 'evidence_url': page['url']})
             continue
         for link in page['links']:
             target = urlparse(link)
@@ -215,7 +217,7 @@ def recording_title(title):
     return re.split(r"[※＊]", title, maxsplit=1)[0].strip()
 
 
-def video_match(track_title, video, aliases, region="KR"):
+def video_match(track_title, video, aliases, region="KR", trusted_channel=False):
     track_title = recording_title(track_title)
     snippet = video.get("snippet", {})
     title = snippet.get("title", "")
@@ -248,14 +250,104 @@ def video_match(track_title, video, aliases, region="KR"):
     if not exact:
         return 0
     artist_context = title + " " + snippet.get("description", "")[:1500]
-    if not any(re.search(r"(?<!\w)" + re.escape(a) + r"(?!\w)", artist_context, re.I) for a in aliases if a):
+    if not trusted_channel and not any(re.search(r"(?<!\w)" + re.escape(a) + r"(?!\w)", artist_context, re.I) for a in aliases if a):
         return 0
-    if not re.search(r"official|\bmv\b|m/v|music video|provided to youtube", lower + " " + snippet.get("description", "")[:500].casefold()):
+    if not trusted_channel and not re.search(r"official|\bmv\b|m/v|music video|provided to youtube", lower + " " + snippet.get("description", "")[:500].casefold()):
         return 0
     return 100 if re.search(r"\bmv\b|m/v|music video", lower) else 90
 
 
-def connect_youtube(albums, pages, api_key, aliases, logs, region="KR", search_budget=30):
+NON_RELEASE_VIDEO = re.compile(
+    r"\b(?:teaser|trailer|preview|shorts|reaction|behind|challenge|making|fancam|live|performance|cover|vlog)\b"
+    r"|dance practice|티저|직캠|챌린지|비하인드|메이킹|라이브",
+    re.I,
+)
+RELEASE_DESCRIPTION = re.compile(
+    r"(?:(\d+)(?:st|nd|rd|th)\s+)?((?:digital\s+)?single|mini\s+album|full\s+album|studio\s+album|ep|album)"
+    r"\s*[:：-]?\s*[\[【](.+?)[\]】]",
+    re.I,
+)
+
+
+def _clean_youtube_track_title(title, aliases):
+    quoted = re.findall(r"['‘’\"]([^'‘’\"]+)['‘’\"]", title)
+    if quoted:
+        return quoted[-1].strip()[:300]
+    cleaned = title
+    for alias in sorted(filter(None, aliases), key=len, reverse=True):
+        cleaned = re.sub(r"(?<!\w)" + re.escape(alias) + r"(?!\w)", "", cleaned, flags=re.I)
+    cleaned = re.sub(r"official|music video|m/v|\bmv\b|official audio|audio|visualizer|lyric video", "", cleaned, flags=re.I)
+    return re.sub(r"[\[\]()_｜|]+", " ", cleaned).strip(" -·")[:300]
+
+
+def _naver_release_evidence(artist, track, album, settings, client, logs):
+    if not settings.naver_client_id or not settings.naver_client_secret:
+        return None
+    api_hub = settings.naver_api_provider == "api_hub"
+    url = "https://naverapihub.apigw.ntruss.com/search/v1/news" if api_hub else "https://openapi.naver.com/v1/search/news.json"
+    headers = ({"X-NCP-APIGW-API-KEY-ID": settings.naver_client_id, "X-NCP-APIGW-API-KEY": settings.naver_client_secret}
+               if api_hub else {"X-Naver-Client-Id": settings.naver_client_id, "X-Naver-Client-Secret": settings.naver_client_secret})
+    try:
+        response = client.get(url, params={"query": f'"{artist}" "{track}" "{album}"', "display": 10, "sort": "sim"}, headers=headers)
+        response.raise_for_status()
+        album_key, track_key = key(album), key(track)
+        for item in response.json().get("items", []):
+            text_value = unescape(re.sub(r"<[^>]+>", "", f"{item.get('title', '')} {item.get('description', '')}"))
+            if album_key in key(text_value) and track_key in key(text_value):
+                return {"provider": "naver_news_search", "url": item.get("originallink") or item.get("link"),
+                        "title": unescape(re.sub(r"<[^>]+>", "", item.get("title", "")))[:300]}
+    except httpx.HTTPError:
+        logs.append(f"네이버 앨범 교차 확인 실패: {track} · 검수 대기로 유지")
+    return None
+
+
+def youtube_release_candidates(videos, channel_ids, aliases, settings, logs, limit=50):
+    """Create review candidates only when the official upload explicitly names its release."""
+    albums = {}
+    with httpx.Client(timeout=settings.request_timeout_seconds) as naver_client:
+        for video in videos:
+            snippet = video.get("snippet", {})
+            if snippet.get("channelId") not in channel_ids:
+                continue
+            title, description = snippet.get("title", ""), snippet.get("description", "")
+            if NON_RELEASE_VIDEO.search(title) or NON_RELEASE_VIDEO.search(description[:300]):
+                continue
+            match = RELEASE_DESCRIPTION.search(description) or RELEASE_DESCRIPTION.search(title)
+            if not match:
+                continue
+            track_title = _clean_youtube_track_title(title, aliases)
+            album_title = match.group(3).strip()[:200]
+            if len(key(track_title)) < 2 or len(key(album_title)) < 2:
+                continue
+            album_key = key(album_title)
+            album = albums.setdefault(album_key, {
+                "title": album_title,
+                "album_type": match.group(2).strip(),
+                "release_date": release_date(description),
+                "cover_url": ((snippet.get("thumbnails") or {}).get("high") or (snippet.get("thumbnails") or {}).get("default") or {}).get("url"),
+                "external_url": f"https://www.youtube.com/watch?v={video['id']}",
+                "tracks": [],
+                "source_kind": "official_youtube_release",
+            })
+            if any(key(track["title"]) == key(track_title) for track in album["tracks"]):
+                continue
+            evidence = _naver_release_evidence(aliases[0], track_title, album_title, settings, naver_client, logs)
+            album["tracks"].append({
+                "title": track_title,
+                "duration": video.get("contentDetails", {}).get("duration"),
+                "url": f"https://www.youtube.com/watch?v={video['id']}",
+                "source_url": f"https://www.youtube.com/watch?v={video['id']}",
+                "video_evidence": {"channel_id": snippet.get("channelId"), "title": title, "source": "explicit_official_channel"},
+                "release_evidence": evidence,
+                "youtube_published_at": snippet.get("publishedAt"),
+            })
+            logs.append(f"공식 YouTube 발표곡 후보: {track_title} · {album_title}" + (" · 네이버 교차 확인" if evidence else " · 외부 근거 검토 필요"))
+            if sum(len(item["tracks"]) for item in albums.values()) >= limit:
+                break
+    return list(albums.values())
+
+
+def connect_youtube(albums, pages, api_key, aliases, logs, region="KR", search_budget=30, official_youtube_url=None, settings=None):
     """Search only channels evidenced by official-site outbound links/videos.
 
     The search budget is per execution and explicitly surfaced, not unlimited.
@@ -264,8 +356,9 @@ def connect_youtube(albums, pages, api_key, aliases, logs, region="KR", search_b
     if not api_key:
         logs.append("YouTube API 설정 없음 · 공식 영상 연결 보류")
         return 0, True
-    links = [link for p in pages if not any(s in (urlparse(p['url']).hostname or '')
+    links = ([official_youtube_url] if official_youtube_url else []) + [link for p in pages if not any(s in (urlparse(p['url']).hostname or '')
              for s in ('youtube.', 'instagram.', 'tiktok.', 'facebook.', 'x.com', 'twitter.')) for link in p['links']]
+    links = list(dict.fromkeys(filter(None, links)))
     channel_ids = set()
     video_ids = list(dict.fromkeys(filter(None, (youtube_id(u) for u in links))))[:50]
     for link in links:
@@ -293,7 +386,8 @@ def connect_youtube(albums, pages, api_key, aliases, logs, region="KR", search_b
             if not channel_ids:
                 logs.append("공식 홈페이지에서 채널 소유 근거를 확보하지 못함 · 영상 연결 검토 필요")
                 return 0, True
-            logs.append(f"공식 홈페이지의 채널/영상 링크로 YouTube 채널 {len(channel_ids)}개 확인")
+            evidence_label = "직접 지정한 공식 채널" if official_youtube_url else "공식 홈페이지의 채널/영상 링크"
+            logs.append(f"{evidence_label}로 YouTube 채널 {len(channel_ids)}개 확인")
             # Read uploads in batches instead of spending a search call on
             # every recording. Retain the explicit cap for very large labels.
             for channel in sorted(channel_ids):
@@ -319,13 +413,17 @@ def connect_youtube(albums, pages, api_key, aliases, logs, region="KR", search_b
                         break
                 if token:
                     limited = True
+            if not albums and official_youtube_url and settings:
+                albums.extend(youtube_release_candidates(direct, channel_ids, aliases, settings, logs))
+                if albums:
+                    logs.append(f"공식 홈페이지 앨범 목록이 없어 YouTube 발표곡에서 앨범 후보 {len(albums)}개를 생성했습니다.")
             for album in albums:
                 for track in album['tracks']:
                     identity = key(track['title'])
                     if identity not in cache:
                         candidates = list(direct)
                         for channel in sorted(channel_ids):
-                            if any(video_match(track['title'], v, aliases, region) for v in candidates):
+                            if any(video_match(track['title'], v, aliases, region, v.get('snippet', {}).get('channelId') in channel_ids) for v in candidates):
                                 break
                             if search_disabled or calls >= search_budget:
                                 limited = True
@@ -342,12 +440,12 @@ def connect_youtube(albums, pages, api_key, aliases, logs, region="KR", search_b
                                 limited = search_disabled = True
                                 logs.append((str(exc) if isinstance(exc, ValueError) else 'YouTube 검색 요청 실패') + ' · 추가 검색 중지, 확보된 공식 영상으로 나머지 곡 연결 계속')
                                 break
-                        ranked = sorted(((video_match(track['title'], v, aliases, region), v) for v in candidates), key=lambda x: x[0], reverse=True)
+                        ranked = sorted(((video_match(track['title'], v, aliases, region, v.get('snippet', {}).get('channelId') in channel_ids), v) for v in candidates), key=lambda x: x[0], reverse=True)
                         cache[identity] = ranked[0][1] if ranked and ranked[0][0] else None
                     best = cache[identity]
                     if best:
                         track['url'] = f"https://www.youtube.com/watch?v={best['id']}"
-                        track['video_evidence'] = {'channel_id': best['snippet']['channelId'], 'title': best['snippet']['title'], 'source': 'official_site_link'}
+                        track['video_evidence'] = {'channel_id': best['snippet']['channelId'], 'title': best['snippet']['title'], 'source': 'explicit_official_channel' if official_youtube_url else 'official_site_link'}
                         track['video_duration'] = best.get('contentDetails', {}).get('duration')
                         linked += 1
                         logs.append(f"곡·공식 영상 연결: {track['title']} · {track['url']}")

@@ -1,4 +1,6 @@
 import pytest
+from types import SimpleNamespace
+from media_collector import artist_catalog
 from media_collector.artist_catalog import canonical_url, html_album, video_match, youtube_id, crawl_catalog
 from media_collector import artist_import
 
@@ -30,6 +32,12 @@ def video(title, **kwargs):
 def test_official_mv_matches_exact_song():
     assert video_match('I AM', video("IVE 아이브 'I AM' MV"), ['IVE', '아이브']) == 100
     assert video_match('섬찟(Hypnosis)', video('Hypnosis', snippet={'title': 'Hypnosis', 'description': 'Provided to YouTube IVE'}), ['IVE']) == 90
+
+
+def test_exact_song_from_explicit_official_channel_does_not_require_title_alias():
+    official_upload = video('Glitch', snippet={'title': 'Glitch', 'description': '', 'channelId': 'UCofficial'})
+    assert video_match('Glitch', official_upload, ['권은비'], trusted_channel=True) == 90
+    assert video_match('Glitch', official_upload, ['권은비']) == 0
 
 
 @pytest.mark.parametrize('title', ["IVE 'I AM' MV Teaser", "IVE 'I AM' LIVE", "IVE 'I AM' Japanese ver. Official MV", "IVE 'I AM' dance practice", "IVE 'I AM' performance", "IVE 'I AM NOT' MV", "IVE 'I AM' Instrumental", "IVE 'I AM' cover"])
@@ -74,6 +82,64 @@ def test_search_rate_limit_does_not_discard_known_official_videos(monkeypatch):
 def test_non_youtube_track_url_is_not_a_video():
     assert youtube_id('https://untrusted.example/watch?v=12345678901') is None
     assert youtube_id('https://youtu.be/12345678901') == '12345678901'
+
+
+def test_explicit_official_youtube_channel_is_used_without_homepage_link(monkeypatch):
+    requested = []
+
+    class Response:
+        is_error = False
+
+        def json(self):
+            return {"items": []}
+
+    class Client:
+        def __init__(self, **_kwargs): pass
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def get(self, url, params=None):
+            requested.append((url, params or {}))
+            if url.endswith('/channels') and (params or {}).get('forHandle'):
+                return type('HandleResponse', (), {'is_error': False, 'json': lambda self: {'items': [{'id': 'UC123'}]}})()
+            return Response()
+
+    monkeypatch.setattr(artist_catalog.httpx, 'Client', Client)
+    logs = []
+    artist_catalog.connect_youtube([], [], 'key', ['아이유'], logs, official_youtube_url='https://www.youtube.com/@dlwlrma')
+    assert any(params.get('forHandle') == '@dlwlrma' for _, params in requested)
+    assert any('직접 지정한 공식 채널' in message for message in logs)
+
+
+def test_official_youtube_description_creates_review_release_candidate():
+    video_item = {
+        'id': 'abcdefghijk',
+        'snippet': {
+            'channelId': 'UCofficial',
+            'title': "권은비(KWON EUNBI) 'Hello Stranger' M/V",
+            'description': 'KWON EUNBI 3rd Digital Single [Hello Stranger] : M/V',
+            'publishedAt': '2025-04-15T09:00:00Z',
+            'thumbnails': {'high': {'url': 'https://i.ytimg.com/cover.jpg'}},
+        },
+        'contentDetails': {'duration': 'PT3M22S'},
+    }
+    settings = SimpleNamespace(
+        naver_client_id=None,
+        naver_client_secret=None,
+        naver_api_provider='developers',
+        request_timeout_seconds=10,
+    )
+    logs = []
+
+    albums = artist_catalog.youtube_release_candidates(
+        [video_item], {'UCofficial'}, ['권은비', 'KWON EUNBI'], settings, logs
+    )
+
+    assert albums[0]['title'] == 'Hello Stranger'
+    assert albums[0]['album_type'].lower() == 'digital single'
+    assert albums[0]['release_date'] is None
+    assert albums[0]['tracks'][0]['title'] == 'Hello Stranger'
+    assert albums[0]['tracks'][0]['url'].endswith('abcdefghijk')
+    assert albums[0]['tracks'][0]['release_evidence'] is None
 
 
 def test_crawler_follows_same_site_discography_and_reports_limit(monkeypatch):

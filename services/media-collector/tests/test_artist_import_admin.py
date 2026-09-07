@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 from pathlib import Path
+import inspect
 import json
 import subprocess
 
@@ -10,7 +11,14 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from media_collector import admin, main
-from media_collector.artist_import import ArtistPageParser, _commons_source_url, _slug
+from media_collector.artist_import import (
+    ArtistPageParser,
+    _commons_source_url,
+    _direct_socials,
+    _official_fandom_name,
+    _slug,
+    source_url_allowed_for_region,
+)
 from media_collector.models import Base, CollectionJob, CollectionRule, CollectorSettings
 from media_collector.presets import DEFAULT_NEWS_SOURCES
 
@@ -62,8 +70,18 @@ def test_artist_import_page_exposes_header_entry_and_all_content_scopes():
     assert 'id="job-status"' in admin.ARTIST_IMPORT_HTML
     assert 'id="job-sort"' in admin.ARTIST_IMPORT_HTML
     assert 'id="discover-artist-sources"' in admin.ARTIST_IMPORT_HTML
+    assert 'id="source-search-region"' in admin.ARTIST_IMPORT_HTML
+    assert '<option value="global">해외 포함</option>' in admin.ARTIST_IMPORT_HTML
+    assert 'source_search_region:searchRegion' in admin.ARTIST_IMPORT_HTML
     assert 'id="source-discovery-status"' in admin.ARTIST_IMPORT_HTML
-    assert "chooseArtist(preview.candidates||[],'sources')" in admin.ARTIST_IMPORT_HTML
+    assert "네이버 트렌드 아티스트" in admin.ARTIST_IMPORT_HTML
+    assert 'id="refresh-artist-trends"' in admin.ARTIST_IMPORT_HTML
+    assert "$('refresh-artist-trends').addEventListener" in admin.ARTIST_IMPORT_HTML
+    assert "/admin/api/artist-imports/recommendations" in admin.ARTIST_IMPORT_HTML
+    assert "data-trend-index" in admin.ARTIST_IMPORT_HTML
+    assert "discoverArtistSources(true)" in admin.ARTIST_IMPORT_HTML
+    assert "await discoverArtistSources(false)" in admin.ARTIST_IMPORT_HTML
+    assert "savedSources.filter(url=>sourceMatchesCountry(url,country))" in admin.ARTIST_IMPORT_HTML
     assert 'Wikimedia Commons는 이미지 검증 출처로 항상 포함됩니다.' in admin.ARTIST_IMPORT_HTML
     assert ".jobs-panel{border-color:#566178" in admin.ARTIST_IMPORT_HTML
     assert ".settings-panel{grid-column:1;grid-row:1}" in admin.ARTIST_IMPORT_HTML
@@ -88,6 +106,22 @@ def test_artist_import_page_exposes_header_entry_and_all_content_scopes():
     assert '.activity-log{display:flex;flex-direction:column;height:270px' in admin.ARTIST_IMPORT_HTML
     assert '/admin/api/artist-imports/activity?limit=50' in admin.ARTIST_IMPORT_HTML
     assert "confirm(`${attention.artist_name}의 공식 채널" in admin.ARTIST_IMPORT_HTML
+
+
+def test_artist_recommendations_endpoint_refreshes_naver_without_starting_import(monkeypatch):
+    marker = object()
+    calls = []
+
+    def fake_recommendations(db, **kwargs):
+        calls.append((db, kwargs))
+        return {"artists": [{"name": "상승돌"}], "generated_at": "2026-09-07T00:00:00Z"}
+
+    monkeypatch.setattr(admin, "trending_idol_recommendations", fake_recommendations)
+
+    result = admin.artist_import_recommendations(refresh=True, db=marker)
+
+    assert result["artists"] == [{"name": "상승돌"}]
+    assert calls == [(marker, {"artist_limit": 12, "force_refresh": True})]
 
 
 def test_artist_list_uses_admin_summary_filters_and_responsive_cards():
@@ -122,6 +156,13 @@ def test_artist_detail_exposes_collection_editor_and_results_tabs():
     assert "activityLog.hidden=!result" in page
     for label in ("프로필", "공식 SNS", "소개", "연혁", "수상", "앨범", "수록곡", "갤러리"):
         assert label in page
+
+
+def test_stored_admin_artists_are_visible_and_collectable_without_prior_job():
+    page = admin.ARTIST_IMPORT_HTML
+    assert '"job_id": f"artist-{artist_id}"' in inspect.getsource(admin.artist_import_jobs)
+    assert '"import_kind": "stored"' in inspect.getsource(admin.artist_import_job)
+    assert "!detailId.startsWith('artist-')" in page
 
 
 def test_artist_import_n8n_workflow_is_versioned_and_active():
@@ -182,12 +223,52 @@ def test_artist_import_request_requires_a_scope_and_valid_official_urls():
             scopes=["profile"],
             official_source_urls=["https://127.0.0.1/private"],
         )
+    request = admin.AdminArtistImportRequest(
+        artist_name="아이유",
+        scopes=["tracks"],
+        official_youtube_url="https://www.youtube.com/@dlwlrma",
+    )
+    assert str(request.official_youtube_url) == "https://www.youtube.com/@dlwlrma"
+    with pytest.raises(ValidationError):
+        admin.AdminArtistImportRequest(
+            artist_name="아이유",
+            scopes=["tracks"],
+            official_youtube_url="https://www.youtube.com/watch?v=abcdefghijk",
+        )
 
 
 def test_commons_source_prefers_category_and_has_artist_search_fallback():
     category_entity = {"claims": {"P373": [{"mainsnak": {"datavalue": {"value": "IVE (group)"}}}]}}
     assert _commons_source_url(category_entity, "아이브") == "https://commons.wikimedia.org/wiki/Category:IVE_(group)"
     assert _commons_source_url({}, "아이브") == "https://commons.wikimedia.org/wiki/Special:MediaSearch?type=image&search=%EC%95%84%EC%9D%B4%EB%B8%8C"
+
+
+def test_domestic_source_filter_excludes_explicit_foreign_localized_urls():
+    assert source_url_allowed_for_region("https://rubi-japan.com/", "KR") is False
+    assert source_url_allowed_for_region("https://artist.example.jp/profile", "KR") is False
+    assert source_url_allowed_for_region("https://x.com/ARTIST_JP", "KR") is False
+    assert source_url_allowed_for_region("https://www.woolliment.com/artists/main_eunbi.php", "KR") is True
+    assert source_url_allowed_for_region("https://www.youtube.com/@official", "KR") is True
+    assert source_url_allowed_for_region("https://rubi-japan.com/", "JP") is True
+
+
+def test_verified_source_urls_map_directly_to_artist_social_fields():
+    assert _direct_socials([
+        "https://x.com/KWONEUNBI",
+        "https://www.instagram.com/official_kwon.eunbi",
+        "https://www.facebook.com/kwoneunbi.official",
+        "https://example.com/profile",
+    ]) == {
+        "x_url": "https://x.com/KWONEUNBI",
+        "instagram_url": "https://www.instagram.com/official_kwon.eunbi",
+        "facebook_url": "https://www.facebook.com/kwoneunbi.official",
+    }
+
+
+def test_fandom_name_requires_explicit_official_page_label():
+    pages = [{"url": "https://official.example/profile", "html": "<dt>팬덤명:</dt><dd>RUBI</dd>"}]
+    assert _official_fandom_name(pages) == "RUBI"
+    assert _official_fandom_name([{"url": "https://official.example", "html": "Fans love RUBI merchandise"}]) is None
 
 
 def test_artist_discovery_uses_name_when_urls_are_empty(monkeypatch):
@@ -278,7 +359,7 @@ def test_candidate_preview_never_starts_collection(monkeypatch, count):
     from media_collector import artist_import
     monkeypatch.setattr(admin, "get_settings", lambda: SimpleNamespace(internal_api_key="secret"))
     candidates = [{"id": f"Q{i+1}", "label": "동명이인", "official_source_urls": [f"https://example.com/{i}"]} for i in range(count)]
-    monkeypatch.setattr(artist_import, "search_artist_candidates", lambda *args: candidates)
+    monkeypatch.setattr(artist_import, "search_artist_candidates", lambda *args, **kwargs: candidates)
     monkeypatch.setattr(admin, "_create_artist_job", lambda *args, **kwargs: pytest.fail("preview created job"))
     request = admin.AdminArtistImportRequest(artist_name="동명이인", scopes=["profile"])
     result = admin.preview_artist_candidates(request)
@@ -288,10 +369,32 @@ def test_candidate_preview_never_starts_collection(monkeypatch, count):
         assert admin._confirmed_identity(request)["id"] == candidate["id"]
 
 
+def test_candidate_preview_forwards_global_api_search_scope(monkeypatch):
+    from media_collector import artist_import
+    monkeypatch.setattr(admin, "get_settings", lambda: SimpleNamespace(internal_api_key="secret"))
+    captured = {}
+
+    def fake_search(*args, **kwargs):
+        captured.update(kwargs)
+        return []
+
+    monkeypatch.setattr(artist_import, "search_artist_candidates", fake_search)
+    request = admin.AdminArtistImportRequest(
+        artist_name="권은비",
+        country_code="KR",
+        source_search_region="global",
+        scopes=["profile"],
+    )
+
+    admin.preview_artist_candidates(request)
+
+    assert captured == {"country_code": "KR", "search_region": "global"}
+
+
 def test_commons_source_alone_does_not_confirm_artist_identity(monkeypatch):
     from media_collector import artist_import
     monkeypatch.setattr(admin, "get_settings", lambda: SimpleNamespace(internal_api_key="secret"))
-    monkeypatch.setattr(artist_import, "search_artist_candidates", lambda *args: [{
+    monkeypatch.setattr(artist_import, "search_artist_candidates", lambda *args, **kwargs: [{
         "id": "Q1", "label": "동명이인", "official_source_urls": [],
         "commons_source_url": "https://commons.wikimedia.org/wiki/Category:Artist",
     }])

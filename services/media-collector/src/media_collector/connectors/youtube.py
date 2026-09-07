@@ -33,6 +33,10 @@ class YouTubeConnector(Connector):
         params: dict[str, Any] = {
             "part": "snippet",
             "type": "video",
+            # Search filtering saves quota and avoids obvious non-embeddable
+            # results, while the videos.list status check below remains the
+            # source of truth before an item is persisted.
+            "videoEmbeddable": "true",
             "q": request.query,
             "maxResults": candidate_limit,
             "order": request.order.value,
@@ -53,10 +57,19 @@ class YouTubeConnector(Connector):
 
         videos = self._get(
             "videos",
-            {"part": "snippet,statistics", "id": ",".join(snippets), "maxResults": len(snippets)},
+            {"part": "snippet,statistics,status", "id": ",".join(snippets), "maxResults": len(snippets)},
         )
-        items = [self._normalize(item) for item in videos.get("items", [])]
+        items = [
+            self._normalize(item)
+            for item in videos.get("items", [])
+            if self._is_publicly_embeddable(item)
+        ]
         return ConnectorPage(items=items, next_cursor=search.get("nextPageToken"))
+
+    @staticmethod
+    def _is_publicly_embeddable(item: dict[str, Any]) -> bool:
+        status = item.get("status") or {}
+        return status.get("privacyStatus") == "public" and status.get("embeddable") is True
 
     @staticmethod
     def _normalize(item: dict[str, Any]) -> MediaContent:

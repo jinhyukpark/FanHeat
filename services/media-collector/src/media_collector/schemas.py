@@ -9,6 +9,7 @@ from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
 class Source(StrEnum):
     YOUTUBE = "youtube"
+    TIKTOK = "tiktok"
     X = "x"
     NEWS = "news"
 

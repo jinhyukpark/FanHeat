@@ -61,7 +61,7 @@ class PipelineRequest(BaseModel):
     limit: int | None = Field(default=None, ge=1, le=50)
     create_drafts: bool = True
     media_ids: list[str] | None = Field(default=None, min_length=1, max_length=50)
-    source: Literal["youtube", "x", "news"] | None = None
+    source: Literal["youtube", "tiktok", "x", "news"] | None = None
     priority: Literal["manual", "background"] = "background"
     trigger_source: Literal["manual", "admin_full_automation", "scheduled"] = "manual"
 
@@ -119,6 +119,15 @@ class EngagementRunResult(BaseModel):
     plans_cancelled_for_human_comments: int
     deferred: bool = False
     deferred_reason: str | None = None
+
+
+class DailyAiVoteResult(BaseModel):
+    vote_date: str
+    eligible_ai_profiles: int
+    active_artists: int
+    already_voted: int
+    votes_created: int
+    unassigned_profiles: int
 
 
 class OllamaChatResponse(BaseModel):

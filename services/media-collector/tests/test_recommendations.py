@@ -71,12 +71,64 @@ def test_recent_mentions_outweigh_static_popularity_and_extract_activity_keyword
 
 
 def test_recommendations_fall_back_to_comeback_and_new_song_terms() -> None:
-    artists = [{"id": 1, "name": "테스트돌", "name_ko": "테스트돌"}]
+    artists = [{"id": 1, "slug": "test-idol", "name": "테스트돌", "name_ko": "테스트돌"}]
 
     result = build_trending_idol_recommendations(artists, [], artist_limit=1)
 
     assert result["artists"][0]["activity_keywords"] == ["컴백", "신곡"]
+    assert result["artists"][0]["slug"] == "test-idol"
     assert result["queries"] == ["테스트돌", "테스트돌 컴백", "테스트돌 신곡"]
+
+
+def test_naver_news_discovery_is_merged_with_existing_artist_candidates(monkeypatch) -> None:
+    class Result:
+        def mappings(self):
+            return self
+
+        def all(self):
+            return []
+
+    class Database:
+        def execute(self, *_args, **_kwargs):
+            return Result()
+
+    monkeypatch.setattr(
+        recommendations,
+        "build_trending_idol_recommendations",
+        lambda *_args, **_kwargs: {
+            "artists": [{"id": 1, "slug": "known", "name": "등록돌", "aliases": ["등록돌"], "score": 2,
+                         "recent_mentions": 1, "activity_keywords": ["컴백"], "discovered_from": "fanheat"}],
+            "queries": [],
+        },
+    )
+    monkeypatch.setattr(
+        recommendations,
+        "discover_naver_kpop_candidates",
+        lambda **_kwargs: {
+            "status": "ok", "article_count": 3,
+            "artists": [{"id": None, "name": "신규돌", "aliases": ["신규돌"], "score": 3,
+                         "recent_mentions": 3, "activity_keywords": ["신곡"], "discovered_from": "naver_news"}],
+        },
+    )
+    refresh_values = []
+
+    def fake_trends(artists, **kwargs):
+        refresh_values.append(kwargs["force_refresh"])
+        return {"status": "ok", "scores": {artist["name"]: {"score": 10} for artist in artists}}
+
+    monkeypatch.setattr(recommendations, "fetch_naver_search_trends", fake_trends)
+    monkeypatch.setattr(
+        recommendations,
+        "get_settings",
+        lambda: type("Settings", (), {"naver_client_id": "id", "naver_client_secret": "secret",
+                                      "naver_api_provider": "developers"})(),
+    )
+
+    result = recommendations.trending_idol_recommendations(Database(), artist_limit=8, force_refresh=True)
+
+    assert {artist["name"] for artist in result["artists"]} == {"등록돌", "신규돌"}
+    assert next(artist for artist in result["artists"] if artist["name"] == "신규돌")["discovered_from"] == "naver_news"
+    assert refresh_values == [True]
 
 
 def test_recommendations_limit_the_number_of_artists() -> None:

@@ -9,6 +9,7 @@ import {
   deleteAdminArtistRelation,
   deleteAdminArtistRelations,
   deleteAdminAlbumTrack,
+  deleteAdminPosts,
   hideAdminComment,
   loadAdminAlbumDetail,
   loadAdminArtistDetail,
@@ -196,7 +197,10 @@ function ArtistRelations({ artist, type, onRefresh }) {
 export function ArtistDetailPage({ initial, onChanged }) {
   const [visibilitySaving, setVisibilitySaving] = useState(false)
   const [visibilityError, setVisibilityError] = useState('')
+  const [profileSaving, setProfileSaving] = useState(false)
+  const [profileSaveError, setProfileSaveError] = useState('')
   const [artist, setArtist] = useState(initial)
+  const [section, setSection] = useState(() => new URLSearchParams(window.location.search).get('section') === 'requests' ? 'requests' : 'artist')
   const [tab, setTab] = useState(() => {
     const requested = new URLSearchParams(window.location.search).get('tab')
     return ['profile', 'albums', 'fans', 'gallery'].includes(requested) ? requested : 'profile'
@@ -207,10 +211,38 @@ export function ArtistDetailPage({ initial, onChanged }) {
     window.history.replaceState(window.history.state, '', url)
     setTab(key)
   }
+  const selectSection = key => {
+    const url = new URL(window.location.href)
+    if (key === 'requests') url.searchParams.set('section', 'requests')
+    else url.searchParams.delete('section')
+    window.history.replaceState(window.history.state, '', url)
+    setSection(key)
+  }
   const [notice, setNotice] = useState('')
-  const [profile, setProfile] = useState(() => ({ ...initial, name_ko: initial.name_ko || '', image_url: initial.image_url || '', description: initial.description || '', real_name: initial.real_name || '', role_description: initial.role_description || '', debut_text: initial.debut_text || '', agency: initial.agency || '', fandom_name: initial.fandom_name || '', hero_image_url: initial.hero_image_url || '', bio_text: (initial.bio_paragraphs || []).join('\n'), history_items: timelineDraft(initial.history_items), award_items: timelineDraft(initial.award_items), facebook_url: initial.facebook_url || '', x_url: initial.x_url || '', instagram_url: initial.instagram_url || '' }))
+  const [profile, setProfile] = useState(() => ({ ...initial, name_ko: initial.name_ko || '', image_url: initial.image_url || '', profile_images: [...(initial.artist_profile_images || [])].sort((a, b) => a.display_order - b.display_order).map(item => item.image_url), description: initial.description || '', real_name: initial.real_name || '', role_description: initial.role_description || '', debut_text: initial.debut_text || '', agency: initial.agency || '', fandom_name: initial.fandom_name || '', hero_image_url: initial.hero_image_url || '', bio_text: (initial.bio_paragraphs || []).join('\n'), history_items: timelineDraft(initial.history_items), award_items: timelineDraft(initial.award_items), facebook_url: initial.facebook_url || '', x_url: initial.x_url || '', instagram_url: initial.instagram_url || '' }))
   const refresh = async message => { const next = await loadAdminArtistDetail(artist.id); setArtist(next); setNotice(message); onChanged() }
-  const saveProfile = async event => { event.preventDefault(); await updateAdminArtist(artist.id, { ...profile, bio_paragraphs: parseLines(profile.bio_text), history_items: timelineValues(profile.history_items), award_items: timelineValues(profile.award_items) }); await refresh('아티스트 프로필을 저장했습니다.') }
+  const saveProfile = async event => {
+    event.preventDefault()
+    if (profileSaving) return
+    setProfileSaving(true)
+    setProfileSaveError('')
+    try {
+      await updateAdminArtist(artist.id, { ...profile, bio_paragraphs: parseLines(profile.bio_text), history_items: timelineValues(profile.history_items), award_items: timelineValues(profile.award_items) })
+      setNotice('아티스트 전체 정보를 저장했습니다.')
+      window.alert('저장 완료되었습니다.')
+      try {
+        await refresh('아티스트 전체 정보를 저장했습니다.')
+      } catch {
+        setProfileSaveError('저장은 완료됐지만 최신 정보를 다시 불러오지 못했습니다. 페이지를 새로고침해 주세요.')
+      }
+    } catch (error) {
+      const message = error.message || '아티스트 정보를 저장하지 못했습니다. 다시 시도해 주세요.'
+      setProfileSaveError(message)
+      window.alert(`저장에 실패했습니다.\n${message}`)
+    } finally {
+      setProfileSaving(false)
+    }
+  }
   const update = (key, value) => setProfile(current => ({ ...current, [key]: value }))
   const toggleVisibility = async (nextStatus) => {
     if (visibilitySaving) return
@@ -232,7 +264,14 @@ export function ArtistDetailPage({ initial, onChanged }) {
       setVisibilitySaving(false)
     }
   }
-  return <section className="admin-page-detail"><header className="admin-page-detail-head"><div><a href="/admin/artists">← 아티스트 목록</a><small>ARTIST DETAIL</small><h2>{artist.name_ko || artist.name}</h2></div><div className="admin-visibility-actions"><AdminDeleteArtist artist={artist} disabled={visibilitySaving} /><span role="status">{artistStatusLabels[artistStatus(artist)]}</span><button type="button" className="admin-primary" disabled={visibilitySaving} onClick={() => toggleVisibility()}>{visibilitySaving ? '변경 중…' : artist.active ? '비공개로 변경' : '공개로 변경'}</button></div></header>{!artist.active && <button type="button" disabled={visibilitySaving} onClick={() => toggleVisibility(artist.review_pending ? 'private' : 'pending')}>{artist.review_pending ? '비공개로 분류' : '검토 대기로 변경'}</button>}{visibilityError && <p className="admin-alert error" role="alert">{visibilityError}</p>}{notice && <p className="admin-alert">{notice}</p>}<nav className="admin-detail-tabs">{[['profile','소개'],['albums','앨범'],['fans','팬'],['gallery','갤러리']].map(([key,label]) => <button type="button" className={tab === key ? 'active' : ''} onClick={() => selectTab(key)} key={key}>{label}<b>{key === 'albums' ? artist.artist_albums?.length || 0 : key === 'fans' ? artist.artist_fans?.length || 0 : key === 'gallery' ? artist.artist_gallery_items?.length || 0 : ''}</b></button>)}</nav><details className="admin-correction-summary"><summary>정보 수정 요청 보기</summary><AdminCorrectionRequests artistId={artist.id} /></details><div className="admin-page-detail-body">{tab === 'profile' ? <form className="admin-profile-editor" onSubmit={saveProfile}><AdminArtistImages profile={profile} gallery={artist.artist_gallery_items || []} onChange={update} /><div className="admin-form-columns"><label>URL Slug<input value={profile.slug} onChange={event => update('slug', event.target.value)} required /></label><label>영문 이름<input value={profile.name} onChange={event => update('name', event.target.value)} required /></label><label>한글 이름<input value={profile.name_ko} onChange={event => update('name_ko', event.target.value)} /></label><label>실명·공식명<input value={profile.real_name} onChange={event => update('real_name', event.target.value)} /></label><label>활동 분야<input value={profile.role_description} onChange={event => update('role_description', event.target.value)} /></label><label>데뷔<input value={profile.debut_text} onChange={event => update('debut_text', event.target.value)} /></label><label>소속사<input value={profile.agency} onChange={event => update('agency', event.target.value)} /></label><label>팬덤명<input value={profile.fandom_name} onChange={event => update('fandom_name', event.target.value)} /></label><label>팔로워<input type="number" min="0" value={profile.follower_count || 0} onChange={event => update('follower_count', event.target.value)} /></label><label>전체 방문자<input type="number" min="0" value={profile.visitor_total || 0} onChange={event => update('visitor_total', event.target.value)} /></label><label>오늘 방문자<input type="number" min="0" value={profile.visitor_today || 0} onChange={event => update('visitor_today', event.target.value)} /></label><label>Facebook URL<input value={profile.facebook_url} onChange={event => update('facebook_url', event.target.value)} /></label><label>X URL<input value={profile.x_url} onChange={event => update('x_url', event.target.value)} /></label><label>Instagram URL<input value={profile.instagram_url} onChange={event => update('instagram_url', event.target.value)} /></label></div><label>짧은 소개<textarea value={profile.description} onChange={event => update('description', event.target.value)} /></label><label>소개 본문 <small>문단마다 줄바꿈</small><textarea value={profile.bio_text} onChange={event => update('bio_text', event.target.value)} /></label><div className="admin-form-columns"><AdminTimelineEditor title="연혁" items={profile.history_items} onChange={items => update('history_items', items)} /><AdminTimelineEditor title="수상" items={profile.award_items} onChange={items => update('award_items', items)} /></div><button className="admin-primary">아티스트 전체 정보 저장</button></form> : <ArtistRelations artist={artist} type={tab} onRefresh={refresh} />}</div></section>
+  const requestCount = pendingCorrectionCount(artist)
+  return <section className="admin-page-detail"><header className="admin-page-detail-head"><div><a href="/admin/artists">← 아티스트 목록</a><small>ARTIST DETAIL</small><h2>{artist.name_ko || artist.name}</h2></div><div className="admin-visibility-actions"><AdminDeleteArtist artist={artist} disabled={visibilitySaving} /><span role="status">{artistStatusLabels[artistStatus(artist)]}</span><button type="button" className="admin-primary" disabled={visibilitySaving} onClick={() => toggleVisibility()}>{visibilitySaving ? '변경 중…' : artist.active ? '비공개로 변경' : '공개로 변경'}</button></div></header>{!artist.active && <button type="button" disabled={visibilitySaving} onClick={() => toggleVisibility(artist.review_pending ? 'private' : 'pending')}>{artist.review_pending ? '비공개로 분류' : '검토 대기로 변경'}</button>}{visibilityError && <p className="admin-alert error" role="alert">{visibilityError}</p>}{notice && <p className="admin-alert" role="status">{notice}</p>}
+    <nav className="admin-artist-section-tabs" aria-label="아티스트 상세 메뉴">
+      <button type="button" className={section === 'artist' ? 'active' : ''} aria-current={section === 'artist' ? 'page' : undefined} onClick={() => selectSection('artist')}>아티스트 정보</button>
+      <button type="button" className={section === 'requests' ? 'active' : ''} aria-current={section === 'requests' ? 'page' : undefined} onClick={() => selectSection('requests')}>수정 요청 <b>{requestCount}</b></button>
+    </nav>
+    {section === 'artist' ? <><nav className="admin-detail-tabs">{[['profile','소개'],['albums','앨범'],['fans','팬'],['gallery','갤러리']].map(([key,label]) => <button type="button" className={tab === key ? 'active' : ''} onClick={() => selectTab(key)} key={key}>{label}<b>{key === 'albums' ? artist.artist_albums?.length || 0 : key === 'fans' ? artist.artist_fans?.length || 0 : key === 'gallery' ? artist.artist_gallery_items?.length || 0 : ''}</b></button>)}</nav><div className="admin-page-detail-body">{tab === 'profile' ? <form className="admin-profile-editor" onSubmit={saveProfile}><AdminArtistImages profile={profile} gallery={artist.artist_gallery_items || []} onChange={update} /><div className="admin-form-columns"><label>URL Slug<input value={profile.slug} onChange={event => update('slug', event.target.value)} required /></label><label>영문 이름<input value={profile.name} onChange={event => update('name', event.target.value)} required /></label><label>한글 이름<input value={profile.name_ko} onChange={event => update('name_ko', event.target.value)} /></label><label>실명·공식명<input value={profile.real_name} onChange={event => update('real_name', event.target.value)} /></label><label>활동 분야<input value={profile.role_description} onChange={event => update('role_description', event.target.value)} /></label><label>데뷔<input value={profile.debut_text} onChange={event => update('debut_text', event.target.value)} /></label><label>소속사<input value={profile.agency} onChange={event => update('agency', event.target.value)} /></label><label>팬덤명<input value={profile.fandom_name} onChange={event => update('fandom_name', event.target.value)} /></label><label>팔로워<input type="number" min="0" value={profile.follower_count || 0} onChange={event => update('follower_count', event.target.value)} /></label><label>전체 방문자<input type="number" min="0" value={profile.visitor_total || 0} onChange={event => update('visitor_total', event.target.value)} /></label><label>오늘 방문자<input type="number" min="0" value={profile.visitor_today || 0} onChange={event => update('visitor_today', event.target.value)} /></label><label>Facebook URL<input value={profile.facebook_url} onChange={event => update('facebook_url', event.target.value)} /></label><label>X URL<input value={profile.x_url} onChange={event => update('x_url', event.target.value)} /></label><label>Instagram URL<input value={profile.instagram_url} onChange={event => update('instagram_url', event.target.value)} /></label></div><label>짧은 소개<textarea value={profile.description} onChange={event => update('description', event.target.value)} /></label><label>소개 본문 <small>문단마다 줄바꿈</small><textarea value={profile.bio_text} onChange={event => update('bio_text', event.target.value)} /></label><div className="admin-form-columns"><AdminTimelineEditor title="연혁" items={profile.history_items} onChange={items => update('history_items', items)} /><AdminTimelineEditor title="수상" items={profile.award_items} onChange={items => update('award_items', items)} /></div>{profileSaveError && <p className="admin-alert error admin-profile-save-message" role="alert">{profileSaveError}</p>}<button className="admin-primary" disabled={profileSaving}>{profileSaving ? '저장 중…' : '아티스트 전체 정보 저장'}</button></form> : <ArtistRelations artist={artist} type={tab} onRefresh={refresh} />}</div></> : <div className="admin-page-detail-body admin-correction-board-wrap"><AdminCorrectionRequests artistId={artist.id} /></div>}
+  </section>
 }
 
 export function ArtistsPanel({ rows, onReload }) {
@@ -294,10 +333,26 @@ function PostDetail({ initial, artists, onClose, onChanged }) {
 export function PostsPanel({ rows, artists, onReload }) {
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(null)
+  const [selectedIds, setSelectedIds] = useState(new Set())
+  const [deleting, setDeleting] = useState(false)
   const keyword = safeLower(query.trim())
   const visible = rows.filter(post => !keyword || safeLower(`${post.title} ${post.summary} ${post.author_display_name} ${(post.tags || []).join(' ')}`).includes(keyword))
+  const selectedCount = selectedIds.size
+  const allVisibleSelected = visible.length > 0 && visible.every(post => selectedIds.has(post.id))
+  useEffect(() => setSelectedIds(current => new Set([...current].filter(id => rows.some(post => post.id === id)))), [rows])
   const open = async post => setSelected(await loadAdminPostDetail(post.id))
-  return <><div className="admin-search admin-section-search"><input value={query} onChange={event => setQuery(event.target.value)} placeholder="제목, 본문 요약, 작성자, 태그 검색" aria-label="포스트 검색" />{query && <button type="button" onClick={() => setQuery('')}>지우기</button>}<span>{visible.length}건</span></div><section className="admin-panel admin-table-wrap"><table><thead><tr><th>제목 / 작성자</th><th>등록일</th><th>조회</th><th>HEAT</th><th>댓글</th><th>상태</th><th></th></tr></thead><tbody>{visible.map(post => { const thumbnail = [...(post.post_images || [])].sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))[0]?.image_url; return <tr key={post.id}><td><div className="admin-post-list-title">{thumbnail ? <img src={thumbnail} alt="" loading="lazy" /> : <span className="admin-post-list-placeholder" aria-hidden="true">이미지 없음</span>}<span><strong>{post.title}</strong><small>@{post.author_display_name}</small></span></div></td><td>{formatDate(post.created_at)}</td><td>{Number(post.view_count).toLocaleString()}</td><td>{Number(post.vote_count).toLocaleString()}</td><td>{post.comments?.[0]?.count || 0}</td><td><span className={`admin-status ${post.status}`}>{post.status}</span></td><td><button type="button" className="admin-row-action" onClick={() => open(post)}>상세 관리</button></td></tr>})}</tbody></table></section>{selected && <PostDetail initial={selected} artists={artists} onClose={() => setSelected(null)} onChanged={() => onReload()} />}</>
+  const toggle = id => setSelectedIds(current => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })
+  const toggleAllVisible = () => setSelectedIds(current => { const next = new Set(current); visible.forEach(post => allVisibleSelected ? next.delete(post.id) : next.add(post.id)); return next })
+  const removeSelected = async () => {
+    if (!selectedCount || !window.confirm(`선택한 포스트 ${selectedCount}개를 삭제할까요? 연결된 댓글과 반응도 함께 삭제되며 복구할 수 없습니다.`)) return
+    setDeleting(true)
+    try {
+      const deleted = await deleteAdminPosts([...selectedIds])
+      setSelectedIds(new Set())
+      await onReload(`선택한 포스트 ${deleted.length}개를 삭제했습니다.`)
+    } finally { setDeleting(false) }
+  }
+  return <><div className="admin-search admin-section-search"><input value={query} onChange={event => setQuery(event.target.value)} placeholder="제목, 본문 요약, 작성자, 태그 검색" aria-label="포스트 검색" />{query && <button type="button" onClick={() => setQuery('')}>지우기</button>}<span>{visible.length}건</span></div><div className="admin-member-selection admin-post-selection"><label><input type="checkbox" checked={allVisibleSelected} disabled={!visible.length || deleting} onChange={toggleAllVisible} /> 현재 목록 전체 선택</label><span>{selectedCount}개 선택</span><button type="button" disabled={!selectedCount || deleting} onClick={removeSelected}>{deleting ? '삭제 중…' : '선택 삭제'}</button></div><section className="admin-panel admin-table-wrap"><table><thead><tr><th className="admin-post-check-column"><span className="sr-only">선택</span></th><th>제목 / 작성자</th><th>등록일</th><th>조회</th><th>HEAT</th><th>댓글</th><th>상태</th><th></th></tr></thead><tbody>{visible.map(post => { const thumbnail = [...(post.post_images || [])].sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))[0]?.image_url; return <tr className={selectedIds.has(post.id) ? 'selected' : ''} key={post.id}><td className="admin-post-check-column"><input type="checkbox" checked={selectedIds.has(post.id)} disabled={deleting} onChange={() => toggle(post.id)} aria-label={`${post.title} 선택`} /></td><td><div className="admin-post-list-title">{thumbnail ? <img src={thumbnail} alt="" loading="lazy" /> : <span className="admin-post-list-placeholder" aria-hidden="true">이미지 없음</span>}<span><strong>{post.title}</strong><small>@{post.author_display_name}</small></span></div></td><td>{formatDate(post.created_at)}</td><td>{Number(post.view_count).toLocaleString()}</td><td>{Number(post.vote_count).toLocaleString()}</td><td>{post.comments?.[0]?.count || 0}</td><td><span className={`admin-status ${post.status}`}>{post.status}</span></td><td><button type="button" className="admin-row-action" onClick={() => open(post)}>상세 관리</button></td></tr>})}</tbody></table></section>{selected && <PostDetail initial={selected} artists={artists} onClose={() => setSelected(null)} onChanged={() => onReload()} />}</>
 }
 
 export function CommentsPanel({ rows, onReload }) {

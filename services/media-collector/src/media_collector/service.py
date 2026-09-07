@@ -8,7 +8,8 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .config import Settings
-from .connectors import Connector, NewsConnector, XConnector, YouTubeConnector
+from .connectors.tiktok_search import TikTokSearchConnector
+from .connectors import Connector, NewsConnector, TikTokConnector, XConnector, YouTubeConnector
 from .models import CollectionJob, MediaItem, MetricSnapshot, RawMedia
 from .language_policy import apply_language_policy
 from .schemas import Author, CollectionRequest, CollectionResult, ContentType, MediaContent, Metrics, Source, utc_now
@@ -20,6 +21,10 @@ class ConnectorRegistry:
     def __init__(self, settings: Settings):
         self._connectors: dict[Source, Connector] = {
             Source.YOUTUBE: YouTubeConnector(settings.youtube_api_key, settings.request_timeout_seconds),
+            Source.TIKTOK: TikTokSearchConnector(
+                settings.naver_client_id, settings.naver_client_secret,
+                settings.naver_api_provider, settings.request_timeout_seconds,
+            ),
             Source.X: XConnector(settings.x_bearer_token, settings.request_timeout_seconds),
             Source.NEWS: NewsConnector(
                 settings.news_api_key,
@@ -48,6 +53,8 @@ class CollectionService:
             self.db.commit()
             self.db.refresh(job)
 
+        if job.status == "cancelled":
+            return CollectionResult(job_id=job.id, source=request.source, status="cancelled")
         job.status = "running"
         job.started_at = utc_now()
         self.db.commit()
@@ -55,8 +62,16 @@ class CollectionService:
         inserted = updated = 0
         try:
             page = self.registry.get(request.source).collect(request, job.cursor)
+            self.db.refresh(job)
+            if job.status == "cancelled":
+                self.db.rollback()
+                return CollectionResult(job_id=job.id, source=request.source, status="cancelled")
             selected_items = apply_language_policy(page.items, request)
             for content in selected_items:
+                self.db.refresh(job)
+                if job.status == "cancelled":
+                    self.db.rollback()
+                    return CollectionResult(job_id=job.id, source=request.source, status="cancelled")
                 created = self._upsert(content)
                 inserted += int(created)
                 updated += int(not created)
