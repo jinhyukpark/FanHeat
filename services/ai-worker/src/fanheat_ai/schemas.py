@@ -63,6 +63,7 @@ class PipelineRequest(BaseModel):
     media_ids: list[str] | None = Field(default=None, min_length=1, max_length=50)
     source: Literal["youtube", "x", "news"] | None = None
     priority: Literal["manual", "background"] = "background"
+    trigger_source: Literal["manual", "admin_full_automation", "scheduled"] = "manual"
 
 
 class PipelineResult(BaseModel):

@@ -25,6 +25,7 @@ class PipelineService:
         create_drafts: bool = True,
         media_ids: list[str] | None = None,
         source: str | None = None,
+        trigger_source: str = "manual",
     ) -> PipelineResult:
         batch_size = limit or self.settings.pipeline_batch_size
         with self.engine.begin() as connection:
@@ -88,7 +89,7 @@ class PipelineService:
                     if enrichment.publish_recommendation == "reject":
                         skipped += 1
                     elif persona and generated_draft and self._create_post_draft(
-                        item, enrichment, generated_draft, persona
+                        item, enrichment, generated_draft, persona, trigger_source
                     ):
                         drafts_created += 1
                     else:
@@ -169,6 +170,7 @@ class PipelineService:
         enrichment: EnrichmentResult,
         draft: DraftContent,
         persona: dict,
+        trigger_source: str,
     ) -> bool:
         risk_flags = list(draft.risk_flags)
         if enrichment.publish_recommendation == "review" and "analysis_review" not in risk_flags:
@@ -176,6 +178,7 @@ class PipelineService:
         status = (
             "approved"
             if self.settings.auto_approve_low_risk
+            and trigger_source == "admin_full_automation"
             and not risk_flags
             and enrichment.publish_recommendation == "publish"
             and draft.confidence >= 0.8
@@ -187,11 +190,11 @@ class PipelineService:
                     """
                     insert into ai_content_drafts (
                       id, persona_id, content_type, generation_key, source_media_item_ids, title, body, tags,
-                      model_name, prompt_version, status, risk_flags, confidence, approval_source,
+                      model_name, prompt_version, status, risk_flags, confidence, trigger_source, approval_source,
                       reviewed_at, created_at, updated_at
                     ) values (
                       :id, :persona_id, 'post', :generation_key, array[cast(:media_id as uuid)], :title, :body, cast(:tags as jsonb),
-                      :model_name, :prompt_version, :status, cast(:risk_flags as jsonb), :confidence,
+                      :model_name, :prompt_version, :status, cast(:risk_flags as jsonb), :confidence, :trigger_source,
                       case when :status = 'approved' then 'auto_policy' else null end,
                       case when :status = 'approved' then now() else null end, now(), now()
                     )
@@ -210,6 +213,7 @@ class PipelineService:
                     "status": status,
                     "risk_flags": __import__("json").dumps(risk_flags, ensure_ascii=False),
                     "confidence": draft.confidence,
+                    "trigger_source": trigger_source,
                 },
             )
             connection.execute(

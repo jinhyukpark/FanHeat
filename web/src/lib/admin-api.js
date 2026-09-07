@@ -19,6 +19,50 @@ const optionalAdminHttpUrl = (value, fieldLabel) => {
 
 export const isAdminUser = user => user?.app_metadata?.role === 'admin'
 
+const HERO_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp']
+
+const uploadHeroImage = async (client, file, role) => {
+  if (!file) return null
+  if (!HERO_IMAGE_TYPES.includes(file.type) || file.size > 25 * 1024 * 1024) throw new Error('JPG, PNG, WebP 형식과 25MB 이하 이미지만 업로드할 수 있습니다.')
+  const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+  const path = `hero-slides/${crypto.randomUUID()}-${role}.${extension}`
+  const upload = await client.storage.from('fanheat-assets').upload(path, file, { cacheControl: '3600', contentType: file.type, upsert: false })
+  if (upload.error) throw upload.error
+  return client.storage.from('fanheat-assets').getPublicUrl(path).data.publicUrl
+}
+
+export async function loadAdminHeroSlides() {
+  return throwIfError(await requireSupabase().from('home_hero_slides').select('*').order('display_order').order('id'))
+}
+
+export async function saveAdminHeroSlide(values, files = {}) {
+  const client = requireSupabase()
+  const backgroundUrl = await uploadHeroImage(client, files.background, 'background') || optionalAdminHttpUrl(values.background_url, '배경 이미지 URL')
+  const foregroundUrl = values.layout_type === 'layered'
+    ? await uploadHeroImage(client, files.foreground, 'foreground') || optionalAdminHttpUrl(values.foreground_url, '가운데 이미지 URL')
+    : null
+  if (!backgroundUrl) throw new Error('배경 이미지를 선택해 주세요.')
+  if (values.layout_type === 'layered' && !foregroundUrl) throw new Error('배경 + 가운데 유형에는 가운데 이미지가 필요합니다.')
+  const payload = {
+    layout_type: values.layout_type,
+    background_url: backgroundUrl,
+    foreground_url: foregroundUrl,
+    title: String(values.title || '').trim().slice(0, 120),
+    subtitle: String(values.subtitle || '').trim().slice(0, 180),
+    active: Boolean(values.active),
+    display_order: Math.max(0, Number(values.display_order) || 0),
+    updated_at: new Date().toISOString(),
+  }
+  const request = values.id
+    ? client.from('home_hero_slides').update(payload).eq('id', values.id)
+    : client.from('home_hero_slides').insert(payload)
+  return throwIfError(await request.select().single())
+}
+
+export async function deleteAdminHeroSlide(id) {
+  return throwIfError(await requireSupabase().from('home_hero_slides').delete().eq('id', id).select().single())
+}
+
 export async function loadAdminDashboard() {
   const client = requireSupabase()
   const [members, artists, posts, comments, photos, votes, recentPosts, recentComments, auditLogs] = await Promise.all([

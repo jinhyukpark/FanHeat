@@ -49,6 +49,20 @@
   object-fit: cover;
 }
 
+.hero .album-card.background-only {
+  justify-content:flex-end;
+  align-items:flex-start;
+  padding:8vh 8% 7vh;
+}
+
+.hero .album-card.background-only p {
+  width:100%;
+  padding:18px 20px;
+  border-radius:12px;
+  background:#17121a99;
+  backdrop-filter:blur(8px);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .hero-backgrounds > div {
     transition: none;

@@ -182,6 +182,9 @@ def test_approved_posts_receive_non_uniform_publish_slots_in_configured_range():
     with engine.begin() as connection:
         scheduled = service._schedule_approved_posts(connection)
 
+    selection = next(statement for statement, _ in engine.connection.statements if "status = 'approved'" in statement)
+    assert "approval_source in ('admin_manual', 'admin_bulk', 'n8n')" in selection
+    assert "trigger_source = 'admin_full_automation'" in selection
     updates = [parameters for statement, parameters in engine.connection.statements if "set status = 'scheduled'" in statement]
     first_gap = (updates[0]["scheduled_at"] - latest).total_seconds() / 60
     second_gap = (updates[1]["scheduled_at"] - updates[0]["scheduled_at"]).total_seconds() / 60

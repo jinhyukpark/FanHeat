@@ -3,6 +3,7 @@ import { supabase } from './lib/supabase'
 import {
   isAdminUser,
   deleteAdminMembers,
+  deleteAdminHeroSlide,
   loadAdminAlbumDetail,
   loadAdminArtistDetail,
   loadAdminArtists,
@@ -10,8 +11,10 @@ import {
   loadAdminDashboard,
   loadAdminFanPhotos,
   loadAdminMembers,
+  loadAdminHeroSlides,
   loadAdminPosts,
   reviewAdminFanPhoto,
+  saveAdminHeroSlide,
   updateAdminMember,
 } from './lib/admin-api'
 import { AlbumDetailPage, ArtistDetailPage, ArtistsPanel, CommentsPanel, PostsPanel } from './AdminContentPanels'
@@ -23,6 +26,7 @@ const ADMIN_ACCOUNT_EMAILS = {
 const sections = [
   ['dashboard', '/admin', '대시보드'],
   ['members', '/admin/members', '회원 관리'],
+  ['hero', '/admin/main-images', '메인 이미지 설정'],
   ['artists', '/admin/artists', '아티스트 관리'],
   ['posts', '/admin/posts', '포스트 관리'],
   ['comments', '/admin/comments', '댓글 관리'],
@@ -106,6 +110,25 @@ function FanPhotos({ rows, onReload }) {
   return <><section className="admin-photo-grid">{rows.map(row => <button type="button" key={row.id} onClick={() => open(row)}><div>{row.images[0]?.signed_url ? <img src={row.images[0].signed_url} alt="" /> : <span>사진 없음</span>}</div><article><small className={`admin-status ${row.status}`}>{row.status}</small><h2>@{row.submitter_name}</h2><p>{row.note || '사진 설명이 없습니다.'}</p><footer>{row.images.length}장 · {formatDate(row.created_at)}</footer></article></button>)}</section>{selected && <div className="admin-modal-backdrop" onMouseDown={event => event.target === event.currentTarget && setSelected(null)}><form className="admin-modal photo-review-modal" onSubmit={save}><header><div><small>FAN PHOTO REVIEW</small><h2>@{selected.submitter_name}</h2></div><button type="button" onClick={() => setSelected(null)}>×</button></header><div className="admin-review-images">{selected.images.map(image => <figure key={image.id}><img src={image.signed_url} alt={image.original_filename} /><figcaption>{image.width}×{image.height}</figcaption></figure>)}</div><p>{selected.note || '사진 설명이 없습니다.'}</p><label>검토 상태<select value={status} onChange={event => setStatus(event.target.value)}><option value="pending">검토 대기</option><option value="approved">배경 사용 승인</option><option value="rejected">반려</option></select></label><label>관리자 메모<textarea value={note} onChange={event => setNote(event.target.value)} /></label><button className="admin-primary">검토 결과 저장</button></form></div>}</>
 }
 
+const emptyHeroSlide = { layout_type: 'layered', background_url: '', foreground_url: '', title: '', subtitle: '', active: true, display_order: 0 }
+
+function HeroSlides({ rows, onReload }) {
+  const [editing, setEditing] = useState(null)
+  const [files, setFiles] = useState({ background: null, foreground: null })
+  const [saving, setSaving] = useState(false)
+  const open = row => { setEditing({ ...(row || emptyHeroSlide) }); setFiles({ background: null, foreground: null }) }
+  const save = async event => {
+    event.preventDefault(); setSaving(true)
+    try { await saveAdminHeroSlide(editing, files); setEditing(null); await onReload('메인 이미지 설정을 저장했습니다.') }
+    finally { setSaving(false) }
+  }
+  const remove = async row => {
+    if (!window.confirm(`“${row.title || '제목 없는 슬라이드'}”를 삭제할까요?`)) return
+    await deleteAdminHeroSlide(row.id); await onReload('메인 이미지 설정을 삭제했습니다.')
+  }
+  return <><section className="admin-hero-intro"><div><h2>데스크톱 메인 캐러셀</h2><p>활성화된 이미지만 표시 순서대로 재생됩니다. 배경 한 장 또는 배경과 가운데 이미지를 조합할 수 있습니다.</p></div><button className="admin-primary" type="button" onClick={() => open(null)}>새 이미지 추가</button></section><section className="admin-hero-grid">{rows.map(row => <article key={row.id} className={!row.active ? 'inactive' : ''}><div className="admin-hero-preview" style={{ backgroundImage: `linear-gradient(135deg,#652c94a8,#108fdba8),url(${row.background_url})` }}>{row.layout_type === 'layered' && row.foreground_url && <img src={row.foreground_url} alt="" />}</div><div><span>{row.layout_type === 'layered' ? '배경 + 가운데' : '배경 한 장'}</span><strong>{row.title || '제목 없음'}</strong><small>{row.active ? '노출 중' : '숨김'} · 순서 {row.display_order}</small></div><footer><button type="button" onClick={() => open(row)}>편집</button><button type="button" className="danger" onClick={() => remove(row)}>삭제</button></footer></article>)}</section>{editing && <div className="admin-modal-backdrop" onMouseDown={event => event.target === event.currentTarget && setEditing(null)}><form className="admin-modal wide admin-hero-editor" onSubmit={save}><header><div><small>MAIN CAROUSEL</small><h2>{editing.id ? '메인 이미지 편집' : '메인 이미지 추가'}</h2></div><button type="button" onClick={() => setEditing(null)}>×</button></header><label>표현 방식<select value={editing.layout_type} onChange={event => setEditing({ ...editing, layout_type: event.target.value })}><option value="layered">배경 이미지 + 가운데 이미지</option><option value="background">배경 이미지 한 장</option></select></label><div className="admin-hero-file-grid"><label>배경 이미지<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => setFiles({ ...files, background: event.target.files[0] || null })} />{editing.background_url && <img src={editing.background_url} alt="현재 배경 이미지" />}</label>{editing.layout_type === 'layered' && <label>가운데 이미지<input type="file" accept="image/jpeg,image/png,image/webp" onChange={event => setFiles({ ...files, foreground: event.target.files[0] || null })} />{editing.foreground_url && <img src={editing.foreground_url} alt="현재 가운데 이미지" />}</label>}</div><label>제목<input value={editing.title} maxLength="120" onChange={event => setEditing({ ...editing, title: event.target.value })} /></label><label>설명<input value={editing.subtitle} maxLength="180" onChange={event => setEditing({ ...editing, subtitle: event.target.value })} /></label><label>표시 순서<input type="number" min="0" value={editing.display_order} onChange={event => setEditing({ ...editing, display_order: event.target.value })} /></label><label className="admin-check"><input type="checkbox" checked={editing.active} onChange={event => setEditing({ ...editing, active: event.target.checked })} /> 메인 캐러셀에 노출</label><button className="admin-primary" disabled={saving}>{saving ? '저장 중…' : '설정 저장'}</button></form></div>}</>
+}
+
 export default function AdminApp() {
   const [user, setUser] = useState(undefined)
   const [section] = useState(() => routeSection(window.location.pathname))
@@ -131,7 +154,7 @@ export default function AdminApp() {
     if (!isAdminUser(user)) return
     setBusy(true); setError(''); if (message) setNotice(message)
     try {
-      const next = section === 'dashboard' ? await loadAdminDashboard() : section === 'members' ? await loadAdminMembers(memberQuery) : section === 'artists' ? albumId ? await loadAdminAlbumDetail(albumId) : artistId ? await loadAdminArtistDetail(artistId) : await loadAdminArtists() : section === 'posts' ? await Promise.all([loadAdminPosts(), loadAdminArtists()]).then(([posts, artists]) => ({ posts, artists })) : section === 'comments' ? await loadAdminComments() : await loadAdminFanPhotos()
+      const next = section === 'dashboard' ? await loadAdminDashboard() : section === 'members' ? await loadAdminMembers(memberQuery) : section === 'hero' ? await loadAdminHeroSlides() : section === 'artists' ? albumId ? await loadAdminAlbumDetail(albumId) : artistId ? await loadAdminArtistDetail(artistId) : await loadAdminArtists() : section === 'posts' ? await Promise.all([loadAdminPosts(), loadAdminArtists()]).then(([posts, artists]) => ({ posts, artists })) : section === 'comments' ? await loadAdminComments() : await loadAdminFanPhotos()
       setData(next)
     } catch (loadError) { setError(loadError.message) }
     finally { setBusy(false) }
@@ -142,5 +165,5 @@ export default function AdminApp() {
   if (user === undefined) return <main className="admin-loading">관리자 세션을 확인하고 있습니다…</main>
   if (!user) return <AdminLogin onAuthenticated={setUser} />
   if (!isAdminUser(user)) return <AccessDenied user={user} onLogout={logout} />
-  return <div className="admin-app"><aside className="admin-sidebar"><a className="admin-brand" href="/admin"><span>☆</span><strong>FAN HEAT</strong><small>ADMIN CONSOLE</small></a><nav>{sections.map(([key, href, label]) => <a className={section === key ? 'active' : ''} href={href} key={key}>{label}</a>)}</nav><div><a href="/">사용자 페이지</a><button onClick={logout}>로그아웃</button></div></aside><main className="admin-main"><header className="admin-topbar"><div><small>FANHEAT BACK OFFICE</small><h1>{title}</h1></div><span>{user.email}</span></header><section className="admin-content">{notice && <p className="admin-alert">{notice}</p>}{error && <p className="admin-alert error">{error}</p>}{section === 'members' && <form className="admin-search" onSubmit={event => { event.preventDefault(); load() }}><input value={memberQuery} onChange={event => setMemberQuery(event.target.value)} placeholder="회원 이름 또는 ID 검색" /><button>검색</button></form>}{busy && !data ? <p className="admin-loading">데이터를 불러오고 있습니다…</p> : data && (section === 'dashboard' ? <Dashboard data={data} /> : section === 'members' ? <Members rows={data} onReload={load} /> : section === 'artists' ? albumId ? <AlbumDetailPage initial={data} onChanged={load} /> : artistId ? <ArtistDetailPage initial={data} onChanged={load} /> : <ArtistsPanel rows={data} onReload={load} /> : section === 'posts' ? <PostsPanel rows={data.posts} artists={data.artists} onReload={load} /> : section === 'comments' ? <CommentsPanel rows={data} onReload={load} /> : <FanPhotos rows={data} onReload={load} />)}</section></main></div>
+  return <div className="admin-app"><aside className="admin-sidebar"><a className="admin-brand" href="/admin"><span>☆</span><strong>FAN HEAT</strong><small>ADMIN CONSOLE</small></a><nav>{sections.map(([key, href, label]) => <a className={section === key ? 'active' : ''} href={href} key={key}>{label}</a>)}</nav><div><a href="/">사용자 페이지</a><button onClick={logout}>로그아웃</button></div></aside><main className="admin-main"><header className="admin-topbar"><div><small>FANHEAT BACK OFFICE</small><h1>{title}</h1></div><span>{user.email}</span></header><section className="admin-content">{notice && <p className="admin-alert">{notice}</p>}{error && <p className="admin-alert error">{error}</p>}{section === 'members' && <form className="admin-search" onSubmit={event => { event.preventDefault(); load() }}><input value={memberQuery} onChange={event => setMemberQuery(event.target.value)} placeholder="회원 이름 또는 ID 검색" /><button>검색</button></form>}{busy && !data ? <p className="admin-loading">데이터를 불러오고 있습니다…</p> : data && (section === 'dashboard' ? <Dashboard data={data} /> : section === 'members' ? <Members rows={data} onReload={load} /> : section === 'hero' ? <HeroSlides rows={data} onReload={load} /> : section === 'artists' ? albumId ? <AlbumDetailPage initial={data} onChanged={load} /> : artistId ? <ArtistDetailPage initial={data} onChanged={load} /> : <ArtistsPanel rows={data} onReload={load} /> : section === 'posts' ? <PostsPanel rows={data.posts} artists={data.artists} onReload={load} /> : section === 'comments' ? <CommentsPanel rows={data} onReload={load} /> : <FanPhotos rows={data} onReload={load} />)}</section></main></div>
 }

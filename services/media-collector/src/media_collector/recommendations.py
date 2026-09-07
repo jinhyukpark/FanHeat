@@ -4,6 +4,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable
 from zoneinfo import ZoneInfo
+from html import unescape
 
 import httpx
 from sqlalchemy import text
@@ -31,11 +32,102 @@ ACTIVITY_KEYWORDS = (
 FALLBACK_ACTIVITY_KEYWORDS = ("컴백", "신곡")
 NAVER_TREND_CACHE_SECONDS = 6 * 60 * 60
 NAVER_TREND_REFERENCE = {"groupName": "KPOP 기준", "keywords": ["KPOP", "케이팝", "아이돌"]}
+NAVER_DISCOVERY_QUERIES = ("K-POP 아이돌", "아이돌 컴백", "가요계 신곡")
+NAVER_DISCOVERY_STOPWORDS = {
+    "아이돌", "그룹", "가수", "컴백", "신곡", "앨범", "공연", "콘서트", "가요계", "뮤직비디오",
+    "스타", "공개", "발매", "글로벌", "최고", "단독", "공식", "KPOP", "K-POP", "오늘", "서울",
+}
 _naver_trend_cache: dict[tuple[Any, ...], tuple[float, dict[str, Any]]] = {}
 
 
 def _search_text(value: Any) -> str:
     return re.sub(r"\s+", " ", str(value or "")).casefold().strip()
+
+
+def _plain_title(value: Any) -> str:
+    return re.sub(r"<[^>]+>", "", unescape(str(value or ""))).strip()
+
+
+def extract_artist_candidates_from_news(titles: Iterable[str], *, limit: int = 12) -> list[dict[str, Any]]:
+    """Extract conservative artist-name candidates from entertainment headline subject positions."""
+    counts: dict[str, int] = {}
+    activities: dict[str, dict[str, int]] = {}
+    subject_patterns = (
+        r"(?:^|[\]】'’”])\s*(?:그룹\s+|가수\s+|밴드\s+)?([A-Za-z][A-Za-z0-9&.+-]*(?:\s+[A-Za-z0-9&.+-]+){0,2}|[0-9]*[가-힣][가-힣0-9]{1,11})(?:\([^)]*\))?\s*,",
+        r"(?:그룹|가수|밴드)\s+([A-Za-z][A-Za-z0-9&.+-]*(?:\s+[A-Za-z0-9&.+-]+){0,2}|[0-9]*[가-힣][가-힣0-9]{1,11})(?:\([^)]*\))?\s*,",
+        r"!\s*([A-Za-z][A-Za-z0-9&.+-]*(?:\s+[A-Za-z0-9&.+-]+){0,2}|[0-9]*[가-힣][가-힣0-9]{1,11})\s*,",
+    )
+    for raw_title in titles:
+        title = _plain_title(raw_title)
+        found: set[str] = set()
+        for pattern in subject_patterns:
+            found.update(match.strip() for match in re.findall(pattern, title))
+        for candidate in found:
+            normalized = candidate.upper() if re.fullmatch(r"[A-Za-z0-9&.+ -]+", candidate) else candidate
+            if normalized.upper() in NAVER_DISCOVERY_STOPWORDS or len(normalized) < 2 or len(normalized) > 30:
+                continue
+            counts[normalized] = counts.get(normalized, 0) + 1
+            activity_counts = activities.setdefault(normalized, {keyword: 0 for keyword in ACTIVITY_KEYWORDS})
+            for keyword in ACTIVITY_KEYWORDS:
+                if keyword in title:
+                    activity_counts[keyword] += 1
+    ranked = sorted(counts, key=lambda name: (-counts[name], name))[:limit]
+    return [
+        {
+            "id": None,
+            "name": name,
+            "aliases": [name],
+            "score": float(counts[name]),
+            "recent_mentions": counts[name],
+            "activity_keywords": [
+                keyword for keyword, count in sorted(
+                    activities[name].items(), key=lambda pair: (-pair[1], ACTIVITY_KEYWORDS.index(pair[0]))
+                ) if count
+            ][:2] or list(FALLBACK_ACTIVITY_KEYWORDS),
+            "visitor_today": 0,
+            "follower_count": 0,
+            "discovered_from": "naver_news",
+        }
+        for name in ranked
+    ]
+
+
+def discover_naver_kpop_candidates(
+    *, client_id: str | None, client_secret: str | None, provider: str, client: httpx.Client | None = None
+) -> dict[str, Any]:
+    if not client_id or not client_secret:
+        return {"status": "not_configured", "artists": [], "article_count": 0}
+    api_hub = provider == "api_hub"
+    url = (
+        "https://naverapihub.apigw.ntruss.com/search/v1/news"
+        if api_hub else "https://openapi.naver.com/v1/search/news.json"
+    )
+    headers = (
+        {"X-NCP-APIGW-API-KEY-ID": client_id, "X-NCP-APIGW-API-KEY": client_secret}
+        if api_hub else {"X-Naver-Client-Id": client_id, "X-Naver-Client-Secret": client_secret}
+    )
+    http = client or httpx.Client(timeout=20)
+    titles: list[str] = []
+    try:
+        for query in NAVER_DISCOVERY_QUERIES:
+            params: dict[str, Any] = {"query": query, "display": 100, "start": 1, "sort": "date"}
+            if api_hub:
+                params["format"] = "json"
+            response = http.get(url, params=params, headers=headers)
+            response.raise_for_status()
+            titles.extend(item.get("title", "") for item in response.json().get("items", []))
+        return {
+            "status": "ok",
+            "artists": extract_artist_candidates_from_news(titles),
+            "article_count": len(titles),
+            "queries": list(NAVER_DISCOVERY_QUERIES),
+        }
+    except (httpx.HTTPError, ValueError, TypeError) as exc:
+        status_code = exc.response.status_code if isinstance(exc, httpx.HTTPStatusError) else None
+        return {"status": "error", "artists": [], "article_count": len(titles), "status_code": status_code}
+    finally:
+        if client is None:
+            http.close()
 
 
 def _average_ratio(data: list[dict[str, Any]], start: int, end: int | None = None) -> float:
@@ -76,6 +168,7 @@ def fetch_naver_search_trends(
     provider: str,
     client: httpx.Client | None = None,
     end_date: datetime | None = None,
+    force_refresh: bool = False,
 ) -> dict[str, Any]:
     if not client_id or not client_secret:
         return {"status": "not_configured", "scores": {}}
@@ -84,7 +177,7 @@ def fetch_naver_search_trends(
     start = end - timedelta(days=29)
     cache_key = (provider, end.isoformat(), tuple(str(artist["name"]) for artist in artists))
     cached = _naver_trend_cache.get(cache_key)
-    if client is None and cached and time.monotonic() - cached[0] < NAVER_TREND_CACHE_SECONDS:
+    if not force_refresh and client is None and cached and time.monotonic() - cached[0] < NAVER_TREND_CACHE_SECONDS:
         return cached[1] | {"cached": True}
 
     api_hub = provider == "api_hub"
@@ -228,7 +321,13 @@ def build_trending_idol_recommendations(
     return {"artists": selected, "queries": queries}
 
 
-def trending_idol_recommendations(db: Session, *, artist_limit: int = 8, recent_days: int = 30) -> dict[str, Any]:
+def trending_idol_recommendations(
+    db: Session,
+    *,
+    artist_limit: int = 8,
+    recent_days: int = 30,
+    force_refresh: bool = False,
+) -> dict[str, Any]:
     since = datetime.now(timezone.utc) - timedelta(days=recent_days)
     artists = db.execute(
         text(
@@ -259,6 +358,14 @@ def trending_idol_recommendations(db: Session, *, artist_limit: int = 8, recent_
     ).mappings().all()
     candidate_result = build_trending_idol_recommendations(artists, media_items, artist_limit=40)
     settings = get_settings()
+    discovery = {"status": "not_needed", "artists": [], "article_count": 0}
+    if not candidate_result["artists"]:
+        discovery = discover_naver_kpop_candidates(
+            client_id=settings.naver_client_id,
+            client_secret=settings.naver_client_secret,
+            provider=settings.naver_api_provider,
+        )
+        candidate_result["artists"] = discovery["artists"]
     trend_candidates = [
         {"name": artist["name"], "aliases": artist["aliases"]} for artist in candidate_result["artists"]
     ]
@@ -267,6 +374,7 @@ def trending_idol_recommendations(db: Session, *, artist_limit: int = 8, recent_
         client_id=settings.naver_client_id,
         client_secret=settings.naver_client_secret,
         provider=settings.naver_api_provider,
+        force_refresh=force_refresh,
     )
     trend_scores = naver["scores"]
     for artist in candidate_result["artists"]:
@@ -292,4 +400,5 @@ def trending_idol_recommendations(db: Session, *, artist_limit: int = 8, recent_
         "lookback_days": recent_days,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "naver_trend": {key: value for key, value in naver.items() if key != "scores"},
+        "naver_discovery": {key: value for key, value in discovery.items() if key != "artists"},
     }

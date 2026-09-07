@@ -15,7 +15,7 @@
   .mobile-header-menu:focus-visible{outline:2px solid #8c73e9;outline-offset:1px;background:#f4f0ff}
   .topbar>.mobile-logo{display:none}
   .topbar .header-brand-mark{width:42px;height:40px}
-  .topbar .header-brand-mark i{font-size:41px}.topbar .header-brand-mark b{font-size:6px}
+  .topbar .header-brand-mark i{font-size:41px}.topbar .header-brand-mark b{font-size:12px}
   .header-search-tools{min-width:0;width:auto;display:flex;align-items:center;flex:1;gap:7px}
   .header-search-tools:has(.search-filter-button) .search,.topbar .search{height:42px;min-width:0;width:auto;flex:1;padding:0 11px 0 8px;border:1.5px solid transparent;border-radius:22px;background:linear-gradient(#fff,#fff) padding-box,linear-gradient(110deg,#7657ff,#d65ed2,#61a7ff,#9b68ff,#7657ff) border-box;background-size:100% 100%,240% 100%;box-shadow:0 0 0 1px #795ce817,0 0 12px #8e67ec2c;animation:mobileSearchGlow 3.4s ease-in-out infinite}
   .header-search-tools .search:focus-within{box-shadow:0 0 0 2px #8768eb2e,0 0 17px #aa6fe659}
@@ -45,7 +45,7 @@
 
   .awards{min-height:0;margin:0;padding:12px 14px 7px;border:0;border-bottom:1px solid #e4e0e7;border-radius:0;background:transparent;box-shadow:none}
   .section-head{height:auto;min-height:32px;margin-bottom:8px;gap:8px}.section-head h2{font-size:18px;font-weight:600;line-height:32px}.section-title{align-items:center}.view-all-artists{height:32px;padding:0 10px;border-radius:16px;font-size:12px;line-height:1;white-space:nowrap}
-  .periods{padding:3px;border-radius:9px}.periods button{height:26px;padding:0 10px;font-size:10px;border-radius:7px}
+  .periods{padding:3px;border-radius:9px}.periods button{height:26px;padding:0 10px;font-size:12px;border-radius:7px}
   .award-grid{margin:0 -2px;padding:0 2px 4px;gap:6px;scroll-padding-inline:2px;scrollbar-width:none}
   .award-grid::-webkit-scrollbar{display:none}.award-grid article{flex:0 0 calc((100% - 18px)/4);scroll-snap-align:start}
   .award-card{position:relative}.award-image{aspect-ratio:1;border-radius:9px}.award-image img{object-position:center top}.award-caption{min-height:29px;padding:6px 1px 0;display:block}.award-caption strong{height:20px;display:block;overflow:hidden;color:#403a44;font-size:12px;font-weight:600;line-height:20px;text-align:center;text-overflow:ellipsis;white-space:nowrap}.award-caption strong i{height:20px;min-width:28px;margin:0;padding:0 6px;position:absolute;z-index:2;left:5px;top:5px;display:grid;place-items:center;border-radius:10px;background:#211d27c9;color:#fff;font-size:12px;font-style:normal;line-height:1;box-shadow:0 2px 7px #17121f2c;backdrop-filter:blur(4px)}.award-caption small,.award-caption .rank-change{display:none}
@@ -67,7 +67,7 @@
   .post-copy{margin-top:8px;align-self:auto}
   .post h3{margin:0 0 5px;display:-webkit-box;color:#4a444f;font-size:14px;font-weight:600;line-height:1.4;white-space:normal;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden}
   .post p{display:none}
-  .post-author{margin-bottom:5px;font-size:10px}.post-meta,.stats{font-size:10px;overflow:visible}
+  .post-author{margin-bottom:5px;font-size:12px}.post-meta,.stats{font-size:12px;overflow:visible}
   .post-meta{display:grid;grid-template-columns:repeat(3,max-content);align-items:center;column-gap:10px;row-gap:5px}
   .post-meta>span{min-width:0}.post-meta .post-meta-author{width:100%;grid-column:1/-1;color:#77708a}
   .post-list-mobile-card{gap:0}.post-list-mobile-card .post{position:relative;overflow:hidden;display:grid;grid-template-columns:minmax(0,1fr) auto;border:0;border-bottom:1px solid #ddd9e1;border-radius:0;background:#fff!important;box-shadow:none}.post-list-mobile-card .post:first-child{border-top:1px solid #e7e3e9}
@@ -83,7 +83,7 @@
   .post-list-mobile-card .post>.heat{width:auto;min-width:66px;min-height:32px;margin:9px 12px 11px 2px;padding:0 10px 0 7px;align-self:center;justify-self:end;flex-direction:row;gap:4px;border:0;border-radius:16px;background:#eef1f3;box-shadow:none}.post-list-mobile-card .post>.heat .heat-star-wrap{width:23px;height:23px;flex:0 0 23px}.post-list-mobile-card .post>.heat .heat-star{width:21px;height:21px;transform:none}.post-list-mobile-card .post>.heat:hover .heat-star,.post-list-mobile-card .post>.heat.voted .heat-star{transform:scale(1.06)}.post-list-mobile-card .post>.heat .heat-badge{display:none}.post-list-mobile-card .post>.heat strong{margin:0;font-size:12px;line-height:1.1;white-space:nowrap}
   .post-list-mobile-card .post-x-thumbnail{padding:20px 22px;justify-content:flex-start;gap:13px;background:linear-gradient(135deg,#09090b 0%,#29242e 58%,#5d46b3 140%)}
   .post-list-mobile-card .post-x-thumbnail-brand{width:44px;height:44px;flex-basis:44px;font-size:23px}
-  .post-list-mobile-card .post-x-thumbnail strong{font-size:14px}.post-list-mobile-card .post-x-thumbnail small{margin-top:2px;font-size:10px}.post-list-mobile-card .post-x-thumbnail p{margin-top:9px;display:block;color:#d9d2dd;font-size:11px}.post-list-mobile-card .post-x-thumbnail>b{position:absolute;right:16px;top:17px;display:block;color:#ffffff8f;font:700 9px 'Exo',sans-serif;letter-spacing:1.2px}
+  .post-list-mobile-card .post-x-thumbnail strong{font-size:14px}.post-list-mobile-card .post-x-thumbnail small{margin-top:2px;font-size:12px}.post-list-mobile-card .post-x-thumbnail p{margin-top:9px;display:block;color:#d9d2dd;font-size:12px}.post-list-mobile-card .post-x-thumbnail>b{position:absolute;right:16px;top:17px;display:block;color:#ffffff8f;font:700 12px 'Exo',sans-serif;letter-spacing:1.2px}
   .empty{padding:48px 18px;border-radius:18px;background:#fff}
 
   .mobile-app-nav{height:calc(62px + env(safe-area-inset-bottom));padding:4px 6px env(safe-area-inset-bottom);position:fixed;z-index:70;right:0;bottom:0;left:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));align-items:center;border-top:1px solid #e5e0e9;background:#fffffff2;box-shadow:0 -5px 18px #251a320d;backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);opacity:1;visibility:visible;transform:translateY(0);transition:transform .24s ease,opacity .2s ease,visibility 0s linear 0s;will-change:transform}

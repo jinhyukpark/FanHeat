@@ -299,6 +299,10 @@ class PublicationService:
                 where content_type = 'post'
                   and status = 'approved'
                   and scheduled_at is null
+                  and (
+                    approval_source in ('admin_manual', 'admin_bulk', 'n8n')
+                    or (approval_source = 'auto_policy' and trigger_source = 'admin_full_automation')
+                  )
                 order by created_at
                 for update
                 """
@@ -353,6 +357,10 @@ class PublicationService:
                     from ai_content_drafts
                     where status in ('approved', 'scheduled')
                       and (scheduled_at is null or scheduled_at <= now())
+                      and (
+                        approval_source in ('admin_manual', 'admin_bulk', 'n8n')
+                        or (approval_source = 'auto_policy' and trigger_source = 'admin_full_automation')
+                      )
                     order by scheduled_at nulls first, created_at
                     limit :limit
                         """

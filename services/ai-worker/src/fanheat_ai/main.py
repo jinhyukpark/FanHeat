@@ -81,7 +81,9 @@ def run_pipeline(request: PipelineRequest) -> PipelineResult:
     try:
         if request.priority == "manual":
             with workload.manual():
-                return app.state.pipeline.run(request.limit, request.create_drafts, request.media_ids, request.source)
+                return app.state.pipeline.run(
+                    request.limit, request.create_drafts, request.media_ids, request.source, request.trigger_source
+                )
         with workload.background() as acquired:
             if not acquired:
                 return PipelineResult(
@@ -92,7 +94,9 @@ def run_pipeline(request: PipelineRequest) -> PipelineResult:
                     deferred=True,
                     deferred_reason="manual AI draft generation has priority",
                 )
-            return app.state.pipeline.run(request.limit, request.create_drafts, request.media_ids, request.source)
+            return app.state.pipeline.run(
+                request.limit, request.create_drafts, request.media_ids, request.source, request.trigger_source
+            )
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 

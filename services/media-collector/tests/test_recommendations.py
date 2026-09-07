@@ -1,12 +1,44 @@
 from datetime import datetime, timedelta, timezone
 
 import httpx
+import media_collector.recommendations as recommendations
 
 from media_collector.recommendations import (
     build_trending_idol_recommendations,
+    discover_naver_kpop_candidates,
+    extract_artist_candidates_from_news,
     fetch_naver_search_trends,
     score_naver_trend_results,
 )
+
+
+def test_artist_candidates_are_discovered_from_news_headline_subjects() -> None:
+    result = extract_artist_candidates_from_news([
+        "'5세대 아이돌 돌풍 주역' 리센느, 시상식 2관왕",
+        "뜨겁다! 82메이저, 'HEAT' 컴백 첫 주 성료",
+        "그룹 튜넥스, 미니 2집으로 글로벌 성장세 입증",
+    ])
+
+    assert [artist["name"] for artist in result] == ["82메이저", "리센느", "튜넥스"]
+    assert result[0]["discovered_from"] == "naver_news"
+
+
+def test_naver_news_discovery_queries_recent_kpop_topics() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"items": [{"title": "플레이브, 신곡 공개"}]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    result = discover_naver_kpop_candidates(
+        client_id="client-id", client_secret="client-secret", provider="api_hub", client=client
+    )
+
+    assert result["status"] == "ok"
+    assert result["artists"][0]["name"] == "플레이브"
+    assert len(requests) == 3
+    assert all(request.url.path == "/search/v1/news" for request in requests)
 
 
 def test_recent_mentions_outweigh_static_popularity_and_extract_activity_keywords() -> None:
@@ -103,3 +135,33 @@ def test_naver_api_hub_batches_four_artists_with_reference_and_uses_cloud_header
     assert all(request.url.path == "/search-trend/v1/search" for request in requests)
     assert requests[0].headers["x-ncp-apigw-api-key-id"] == "client-id"
     assert requests[0].headers["x-ncp-apigw-api-key"] == "client-secret"
+
+
+def test_force_refresh_bypasses_a_cached_naver_result(monkeypatch) -> None:
+    end_date = datetime(2026, 9, 7, tzinfo=timezone.utc)
+    artists = [{"name": "새로운돌", "aliases": ["새로운돌"]}]
+    cache_key = ("api_hub", end_date.date().isoformat(), ("새로운돌",))
+    recommendations._naver_trend_cache[cache_key] = (
+        recommendations.time.monotonic(),
+        {"status": "ok", "scores": {"새로운돌": {"score": 1}}, "cached": False},
+    )
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"results": []})
+
+    real_client = httpx.Client
+    monkeypatch.setattr(recommendations.httpx, "Client", lambda **_: real_client(transport=httpx.MockTransport(handler)))
+    result = fetch_naver_search_trends(
+        artists,
+        client_id="client-id",
+        client_secret="client-secret",
+        provider="api_hub",
+        end_date=end_date,
+        force_refresh=True,
+    )
+
+    assert result["cached"] is False
+    assert len(requests) == 1
+    recommendations._naver_trend_cache.pop(cache_key, None)

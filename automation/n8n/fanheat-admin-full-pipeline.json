@@ -52,7 +52,7 @@
         "headerParameters": {"parameters": [{"name": "X-FANHEAT-API-KEY", "value": "={{ $env.FANHEAT_INTERNAL_API_KEY }}"}]},
         "sendBody": true,
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({ limit: 50, create_drafts: true, source: $json.source }) }}",
+        "jsonBody": "={{ JSON.stringify({ limit: 50, create_drafts: true, source: $json.source, priority: 'manual', trigger_source: 'admin_full_automation' }) }}",
         "options": {"timeout": 600000}
       },
       "id": "generate-drafts",

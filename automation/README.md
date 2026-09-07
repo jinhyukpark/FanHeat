@@ -58,8 +58,8 @@ Collector admin은 기본적으로 n8n과 같은 `N8N_USER`/`N8N_PASSWORD`를 �
 
 - `fanheat-admin-full-pipeline.json`: 관리자에서 YouTube/News `전체 자동화 실행` 시 현재 화면 설정으로 수집 후 소스별 AI 초안 생성
 - `fanheat-x-full-pipeline.json`: X 전용 관리자 수집·초안 생성. API 인증과 호출 제한을 다른 소스와 격리
-- `fanheat-youtube-scheduled-pipeline.json`: 매일 오전 8시, DB에 저장된 관리자 YouTube 검색어·국가·언어 설정을 읽어 수집 후 초안 생성
-- `fanheat-publish-approved.json`: 1분마다 예약 시각을 확인하고, 자동 승인 포스트는 8~26분의 불규칙한 간격으로 한 건씩 발행
+- `fanheat-youtube-scheduled-pipeline.json`: 비활성 보관 워크플로. 사용자 실행 없이 수집·초안 생성을 시작하지 않도록 활성화하지 않습니다.
+- `fanheat-publish-approved.json`: 1분마다 예약 시각을 확인하고, 관리자 수동 승인 또는 `전체 자동화 실행`으로 정책 승인된 포스트만 8~26분의 불규칙한 간격으로 한 건씩 발행
 - `fanheat-ai-comments.json`: 5분마다 AI 댓글·답글 계획을 확인하고, 예약 시간이 지난 작업만 처리
 - `fanheat-artist-profile-import.json`: 공식 프로필·SNS 근거, 앨범 상세·수록곡과 공식 YouTube 연결을 수집합니다. 작업 종료와 데이터 충족도를 별도로 보고합니다.
 - `fanheat-artist-scheduled-refresh.json`: 수집 완료 아티스트별 갱신 주기를 5분마다 확인하고, 갱신 시각이 된 아티스트만 공식 채널에서 다시 수집
@@ -71,7 +71,7 @@ Collector admin은 기본적으로 n8n과 같은 `N8N_USER`/`N8N_PASSWORD`를 �
   앨범·갤러리 제한, 이미지 저장 버킷, 검토 후 공개 여부가 포함됩니다. 공식 채널 URL은
   HTTPS만 허용하며 로컬·사설 IP는 Collector에서 거부합니다.
 
-관리자 수집 워크플로는 자동 발행하지 않습니다. 수집·초안 생성과 발행을 분리하여 관리자 승인 없이 게시물이 올라가지 않게 합니다. 예약 수집도 하드코딩 검색어를 사용하지 않고 관리자 DB 설정을 사용합니다.
+`수집만 실행`은 미디어만 저장하고 AI 초안·승인·발행을 시작하지 않습니다. `전체 자동화 실행`은 명시적으로 시작한 실행에만 `admin_full_automation` 출처를 기록하며, 저위험 초안의 정책 승인과 예약 발행을 허용합니다. 백그라운드 발행기는 관리자 수동 승인 건과 이 출처의 정책 승인 건만 처리합니다.
 
 News/RSS 화면의 `수집 허용 언론사`에는 언론사명, 기사 원문 도메인, 선택 RSS HTTPS 주소를 저장할 수 있습니다. 한 곳 이상 등록하면 기사 URL의 호스트가 허용 도메인과 일치하는 결과만 수집하며, 이 목록은 관리자 전체 자동화 요청에서 n8n을 거쳐 Collector까지 전달됩니다. 기사 이미지는 갤러리로 복제하지 않습니다. 관리자가 해당 언론사의 `RSS/API·OpenGraph 썸네일 허용`을 켜면 RSS/API 이미지가 없는 경우에도 기사 원문의 `og:image` 또는 `twitter:image`를 확인해 링크 카드 미리보기 주소로 저장합니다. 기사와 썸네일은 공개 HTTPS 주소만 허용하며, 이동 후 기사 도메인도 허용 목록과 다시 대조합니다.
 

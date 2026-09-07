@@ -18,12 +18,16 @@ const validDate = (value, fallback = new Date()) => {
 
 export function calculateHeatSnapshot({ heatRange = 0, lastActivityAt }, now = new Date()) {
   const currentTime = validDate(now)
+  if (!lastActivityAt || Number.isNaN(new Date(lastActivityAt).getTime()) || !(Number(heatRange) > 0)) {
+    return { heatRange: 0, daysRemaining: 0, expiresAt: null }
+  }
   const activityTime = validDate(lastActivityAt, currentTime)
   const elapsedDays = Math.max(0, (currentTime.getTime() - activityTime.getTime()) / DAY_MS)
   const remainingRatio = Math.max(0, 1 - elapsedDays / HEAT_WINDOW_DAYS)
+  const heat = Math.round(Math.max(0, Math.min(100, Number(heatRange) || 0)) * remainingRatio)
   return {
-    heatRange: Math.round(Math.max(0, Math.min(100, Number(heatRange) || 0)) * remainingRatio),
-    daysRemaining: Math.max(0, Math.min(HEAT_WINDOW_DAYS, Math.ceil(HEAT_WINDOW_DAYS - elapsedDays))),
+    heatRange: heat,
+    daysRemaining: heat > 0 ? Math.max(0, Math.min(HEAT_WINDOW_DAYS, Math.ceil(HEAT_WINDOW_DAYS - elapsedDays))) : 0,
     expiresAt: new Date(activityTime.getTime() + HEAT_WINDOW_DAYS * DAY_MS),
   }
 }
@@ -48,13 +52,15 @@ export function calculateFanLevel(fanCredit = 0) {
   const nextMinimum = 100 * level ** 2
   return {
     level,
-    progress: Math.round((credit - currentMinimum) / Math.max(1, nextMinimum - currentMinimum) * 100),
+    progress: Math.min(99, Math.floor((credit - currentMinimum) / Math.max(1, nextMinimum - currentMinimum) * 100)),
     creditToNextLevel: Math.max(0, nextMinimum - credit),
   }
 }
 
-export function calculateFanRank(position = 1, total = 1) {
-  const safeTotal = Math.max(1, Number(total) || 1)
-  const safePosition = Math.max(1, Math.min(safeTotal, Number(position) || 1))
+export function calculateFanRank(position = 0, total = 0) {
+  const safeTotal = Math.max(0, Number(total) || 0)
+  const requestedPosition = Math.max(0, Number(position) || 0)
+  if (!safeTotal || !requestedPosition) return { position: 0, total: safeTotal, topPercent: 0 }
+  const safePosition = Math.min(safeTotal, requestedPosition)
   return { position: safePosition, total: safeTotal, topPercent: Math.max(1, Math.ceil(safePosition / safeTotal * 100)) }
 }
