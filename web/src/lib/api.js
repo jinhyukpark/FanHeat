@@ -53,7 +53,7 @@ export async function loadHomeData() {
   const [tracksResult, awardsResult, postsResult, artistsResult, heroResult] = await Promise.all([
     client.from('tracks').select('id,artist_id,title,subtitle,cover_url,audio_url,display_order').eq('active', true).order('display_order'),
     client.from('award_entries').select('id,name,image_url,score,period,display_order,artist:artists(id,slug,name,name_ko,image_url,description,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,artist_profile_images(image_url,display_order),artist_albums(id,active,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,display_order,artist_album_tracks(id,active,track_number,title,duration_text,lyrics_excerpt,youtube_url,display_order)),artist_gallery_items(id,active,review_status,title,image_url,original_image_url,captured_on,display_order,source_page_url,source_provider,creator_name,license_name,license_url,attribution_text),artist_fans(id,profile_id,display_name,handle,avatar_url,heat_percent,featured_rank,display_order))').eq('active', true).order('display_order'),
-    client.from('posts').select('id,author_id,title,summary,body_html,tags,reference_url,source_label,source_url,source_links,inline_image_sources,audio_url,audio_title,audio_artist,view_count,vote_count,author_display_name,published_at,created_at,post_images(image_url,sort_order,source_label,source_url),comments(count)').eq('status', 'published').order('published_at', { ascending: false }).order('created_at', { ascending: false }),
+    client.from('posts').select('id,author_id,title,summary,body_html,tags,reference_url,source_label,source_url,source_links,inline_image_sources,audio_url,audio_title,audio_artist,view_count,vote_count,author_display_name,author_avatar_url,published_at,created_at,post_images(image_url,sort_order,source_label,source_url),comments(count)').eq('status', 'published').order('published_at', { ascending: false }).order('created_at', { ascending: false }),
     client.from('artists').select('id,slug,name,name_ko,image_url,description,real_name,role_description,debut_text,agency,fandom_name,hero_image_url,bio_paragraphs,history_items,award_items,follower_count,visitor_today,visitor_total,facebook_url,x_url,instagram_url,artist_profile_images(image_url,display_order),artist_albums(id,active,title,lead_track,release_date,album_type,track_count,cover_url,youtube_url,description,label,genre,external_url,display_order,artist_album_tracks(id,active,track_number,title,duration_text,lyrics_excerpt,youtube_url,display_order)),artist_gallery_items(id,active,review_status,title,image_url,original_image_url,captured_on,display_order,source_page_url,source_provider,creator_name,license_name,license_url,attribution_text),artist_fans(id,profile_id,display_name,handle,avatar_url,heat_percent,featured_rank,display_order)').eq('active', true).order('id'),
     client.from('home_hero_slides').select('id,layout_type,background_url,foreground_url,title,subtitle,display_order').eq('active', true).order('display_order').order('id'),
   ])
@@ -78,7 +78,7 @@ export async function loadHomeData() {
       const postImages = [...(row.post_images || [])].sort((a, b) => a.sort_order - b.sort_order)
       const images = postImages.map(item => imageName(item.image_url))
       const imageSources = postImages.map(item => ({ label: item.source_label || '', url: item.source_url || '' }))
-      return [row.title, images[0] || '', { ...row, post_images: postImages, images, image_sources: imageSources, author_avatar_url: postAuthors[row.author_id]?.avatar_url || null, comment_count: row.comments?.[0]?.count || 0 }]
+      return [row.title, images[0] || '', { ...row, post_images: postImages, images, image_sources: imageSources, author_avatar_url: postAuthors[row.author_id]?.avatar_url || row.author_avatar_url || null, comment_count: row.comments?.[0]?.count || 0 }]
     }),
   }
 }
@@ -339,6 +339,7 @@ export async function publishPost(draft, user, imageFiles = [], imagePreviews = 
   const { data, error } = await requireSupabase().from('posts').insert({
     author_id: user.id,
     author_display_name: user.user_metadata?.display_name || user.email?.split('@')[0] || 'FAN',
+    author_avatar_url: user.user_metadata?.avatar_url || null,
     title: draft.title.trim(),
     summary: draft.summary.trim(),
     body_html: draft.content,

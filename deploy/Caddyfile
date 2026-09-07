@@ -6,7 +6,7 @@
 		respond "ok" 200
 	}
 
-	@service_worker path /sw.js /site.webmanifest
+	@service_worker path /sw.js /site.webmanifest /version.json / /index.html /posts/*
 	header @service_worker Cache-Control "no-cache, no-store, must-revalidate"
 
 	@assets path /assets/*
@@ -14,7 +14,7 @@
 
 	handle {
 		root * /srv
-		try_files {path} /index.html
+		try_files {path}/index.html {path} /index.html
 		file_server
 	}
 

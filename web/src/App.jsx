@@ -2371,9 +2371,9 @@ function PostDetail({ post, onClose, user, onLogin, onEdit, previousPost, nextPo
       {activeImageSource && (activeImageSource.sourceLabel || safeExternalUrl(activeImageSource.sourceUrl)) && <ImageSourceCredit source={activeImageSource} />}
       {lightboxIndex !== null && <ImageLightbox images={detailImageSlides} initialIndex={lightboxIndex} title={localizeTitle(post.title)} onClose={() => setLightboxIndex(null)} />}
       <div className="detail-copy post-rich-content" dangerouslySetInnerHTML={{ __html: richHtmlWithImageCredits(post.data?.body_html || '<p>오랜만에 글올쓰네요. 팬들과 함께 나누고 싶은 순간입니다.</p>', inlineImageSources) }} />
+      {tags.length > 0 && <div className="detail-tags detail-body-tags" aria-label="게시글 태그">{tags.map(tag => <span className="detail-tag" key={tag}>#{String(tag).replace(/^#+/, '')}</span>)}</div>}
       <PostSourceCredits sources={articleOnlySources} sourceType={(detailImageSlides.length > 0 || hasInlineImage) ? 'image' : 'article'} />
       <div className="detail-credits">
-        <div className="detail-tags">{tags.map(tag => <span key={tag}>#{tag}</span>)}</div>
         <div className="author"><span>작성자</span><button className="author-profile-link" type="button" onClick={() => onOpenAuthor?.({ userId: post.data?.author_id, id: `@${authorName}`, displayName: authorName, image: 'mypage.jpg', artist: 'FANHEAT' })}>@{authorName}</button>{!isOwner && post.data?.author_id && <button className={`friend-action ${friendStatus}`} type="button" onClick={toggleFriendRequest} disabled={friendPending || ['loading', 'accepted', 'blocked'].includes(friendStatus)} aria-label={friendStatus === 'pending' ? `${authorName}님에게 보낸 친구 요청 취소` : friendStatus === 'accepted' ? `${authorName}님과 친구` : `${authorName}님에게 친구 요청 보내기`}>{friendPending ? (friendStatus === 'pending' ? '취소 중…' : '요청 중…') : friendStatus === 'pending' ? '요청 취소' : friendStatus === 'accepted' ? '✓ 친구' : friendStatus === 'blocked' ? '추가 불가' : friendStatus === 'loading' ? '확인 중…' : '친구 추가'}</button>}</div>
         {friendNotice && <p className="friend-action-notice" role="status" aria-live="polite">{friendNotice}</p>}
       </div>
@@ -2492,7 +2492,7 @@ function ComposerPreview({ draft, images }) {
       {images[0] && (draft.imageSources?.[0]?.label || safeExternalUrl(draft.imageSources?.[0]?.url)) && <ImageSourceCredit source={{ sourceLabel: draft.imageSources[0].label, sourceUrl: draft.imageSources[0].url }} />}
       <div className="detail-copy preview-rich-text post-rich-content" dangerouslySetInnerHTML={{ __html: richHtmlWithImageCredits(draft.content || '<p>본문 내용을 입력하세요.</p>', draft.inlineImageSources || []) }} />
       <PostSourceCredits sources={sourceLinks} sourceLabel={draft.referenceLabel} sourceUrl={draft.reference} />
-      <div className="detail-credits"><div className="detail-tags">{tags.map(tag => <span key={tag}>{tag}</span>)}</div><div className="author"><span>작성자 :</span><strong>@devdevil0625</strong><em>Preview</em></div></div>
+      <div className="detail-credits"><div className="detail-tags" aria-label="게시글 태그">{tags.map(tag => <span className="detail-tag" key={tag}>#{String(tag).replace(/^#+/, '')}</span>)}</div><div className="author"><span>작성자 :</span><strong>@devdevil0625</strong><em>Preview</em></div></div>
       <div className="reaction-buttons"><button className="reaction-gift" type="button" disabled title="기프트 기능은 준비 중입니다"><img src={`${A}gift_icon2.png`} alt="" /><span>GIFT</span><b>준비 중입니다</b></button><button className="reaction-heat heat-soft" type="button"><i className="reaction-heat-star" aria-hidden="true" /><span>HEAT</span><b>0건</b></button></div>
     </div>
   </section>
@@ -2874,6 +2874,7 @@ function FanHeatApp() {
   const [draftInlineImages, setDraftInlineImages] = useState([])
   const [draftInlineImageFiles, setDraftInlineImageFiles] = useState([])
   const composeShortcut = useRef(new URLSearchParams(window.location.search).get('compose') === '1')
+  const postPathId = () => window.location.pathname.match(/^\/posts\/([0-9a-f-]+)\/?$/i)?.[1] || null
   const scrollTimers = useRef(new Map())
   const mobileNavLastScrollY = useRef(0)
   const revealTransientScrollbar = event => {
@@ -2937,7 +2938,7 @@ function FanHeatApp() {
     setWriting(true)
   }
   const closeWriter = () => { setWriting(false); if (editingPost) setSelectedPost(editingPost); setEditingPost(null) }
-  const goHome = () => { setMobileVoteOpen(false); setWriting(false); setEditingPost(null); setSelectedPost(null); setSelectedStar(null); setSelectedFan(null); setArtistDirectory(false); setMyPage(false) }
+  const goHome = () => { setMobileVoteOpen(false); setWriting(false); setEditingPost(null); setSelectedPost(null); setSelectedStar(null); setSelectedFan(null); setArtistDirectory(false); setMyPage(false); if (window.location.pathname.startsWith('/posts/')) window.history.pushState({}, '', '/') }
   const openMyPage = (section = 'profile') => { if (!user) { setAuthOpen(true); return }; setWriting(false); setSelectedPost(null); setSelectedStar(null); setSelectedFan(null); setMyPageMobileSection(section); setMyPageTab(section === 'profile' ? 'posts' : section); setMyPage(true) }
   const selectMyPageMobileSection = section => {
     setMyPageMobileSection(section)
@@ -2967,6 +2968,19 @@ function FanHeatApp() {
     loadHomeData().then(setHome).catch(error => setDataNotice(`DB 연결 실패: ${error.message}`))
     return () => listener.subscription.unsubscribe()
   }, [])
+  useEffect(() => {
+    if (!home.posts.length) return undefined
+    const syncPostFromLocation = () => {
+      const id = postPathId()
+      if (!id) { setSelectedPost(null); return }
+      const index = home.posts.findIndex(([, , data]) => data?.id === id)
+      if (index < 0) { setSelectedPost(null); window.history.replaceState({}, '', '/'); return }
+      setSelectedPost({ title: home.posts[index][0], image: home.posts[index][1], index, data: home.posts[index][2] || {} })
+    }
+    syncPostFromLocation()
+    window.addEventListener('popstate', syncPostFromLocation)
+    return () => window.removeEventListener('popstate', syncPostFromLocation)
+  }, [home.posts])
   useEffect(() => {
     if (!user?.id) { setUnreadMessageCount(0); return undefined }
     let active = true
@@ -3029,22 +3043,29 @@ function FanHeatApp() {
     const title = selectedStar ? `${selectedStar.name} 프로필·앨범·갤러리 | FANHEAT` : selectedPost ? `${selectedPost.title} | FANHEAT K-POP 팬 콘텐츠` : artistDirectory ? 'K-POP 아티스트 찾기 | FANHEAT' : baseTitle
     const description = selectedStar ? `${selectedStar.name}의 프로필, 데뷔 정보, 앨범, 대표곡, 활동 갤러리와 팬 커뮤니티를 확인하세요.` : selectedPost ? selectedPost.data?.summary || `${selectedPost.title}에 관한 K-POP 팬 콘텐츠와 이야기를 확인하세요.` : artistDirectory ? '국내외 K-POP 가수와 아이돌 그룹을 검색하고 최신 앨범과 팬 콘텐츠를 만나보세요.' : baseDescription
     const image = new URL(assetSrc(selectedStar?.image || selectedPost?.image || 'auth-concert.jpg'), origin).href
-    const canonicalUrl = `${origin}${window.location.pathname}`
-    const setMeta = (selector, attribute, value) => { const node = document.head.querySelector(selector); if (node) node.setAttribute(attribute, value) }
+    const canonicalUrl = selectedPost?.data?.id ? `${origin}/posts/${selectedPost.data.id}` : `${origin}${window.location.pathname}`
+    const tags = Array.isArray(selectedPost?.data?.tags) ? selectedPost.data.tags.map(tag => String(tag).replace(/^#+/, '').trim()).filter(Boolean) : []
+    const setMeta = (selector, attribute, value) => { let node = document.head.querySelector(selector); if (!node) { node = document.createElement('meta'); const match = selector.match(/^meta\[(name|property)="([^"]+)"\]$/); if (!match) return; node.setAttribute(match[1], match[2]); document.head.appendChild(node) } node.setAttribute(attribute, value) }
     document.title = title
     setMeta('meta[name="description"]', 'content', description)
     setMeta('meta[property="og:title"]', 'content', title)
     setMeta('meta[property="og:description"]', 'content', description)
     setMeta('meta[property="og:image"]', 'content', image)
+    setMeta('meta[property="og:url"]', 'content', canonicalUrl)
+    setMeta('meta[property="og:type"]', 'content', selectedPost ? 'article' : 'website')
     setMeta('meta[name="twitter:title"]', 'content', title)
     setMeta('meta[name="twitter:description"]', 'content', description)
     setMeta('meta[name="twitter:image"]', 'content', image)
+    setMeta('meta[name="keywords"]', 'content', [...tags, 'K-POP', '팬 커뮤니티', 'FANHEAT'].join(', '))
+    setMeta('meta[name="robots"]', 'content', 'index, follow, max-image-preview:large')
+    setMeta('meta[property="article:published_time"]', 'content', selectedPost?.data?.published_at || selectedPost?.data?.created_at || '')
+    setMeta('meta[property="article:modified_time"]', 'content', selectedPost?.data?.updated_at || selectedPost?.data?.published_at || selectedPost?.data?.created_at || '')
     let canonical = document.head.querySelector('link[rel="canonical"]')
     if (!canonical) { canonical = document.createElement('link'); canonical.rel = 'canonical'; document.head.appendChild(canonical) }
     canonical.href = canonicalUrl
     let schema = document.getElementById('fanheat-structured-data')
     if (!schema) { schema = document.createElement('script'); schema.id = 'fanheat-structured-data'; schema.type = 'application/ld+json'; document.head.appendChild(schema) }
-    schema.textContent = JSON.stringify(selectedPost ? { '@context': 'https://schema.org', '@type': 'Article', headline: selectedPost.title, description, image: [image], author: { '@type': 'Person', name: selectedPost.data?.author_display_name || 'FANHEAT Fan' }, publisher: { '@type': 'Organization', name: 'FANHEAT', logo: { '@type': 'ImageObject', url: `${origin}/images/fanheat-logo.png` } }, mainEntityOfPage: canonicalUrl, datePublished: selectedPost.data?.published_at || selectedPost.data?.created_at } : selectedStar ? { '@context': 'https://schema.org', '@type': 'ProfilePage', name: title, description, url: canonicalUrl, mainEntity: { '@type': 'MusicGroup', name: selectedStar.name, image, description } } : { '@context': 'https://schema.org', '@type': 'WebSite', name: 'FANHEAT', alternateName: ['팬히트', 'Fan Heat'], url: canonicalUrl, description, inLanguage: ['ko-KR', 'en', 'ja'], potentialAction: { '@type': 'SearchAction', target: `${origin}/?q={search_term_string}`, 'query-input': 'required name=search_term_string' } })
+    schema.textContent = JSON.stringify(selectedPost ? { '@context': 'https://schema.org', '@type': 'Article', headline: selectedPost.title, description, image: [image], keywords: tags, inLanguage: 'ko-KR', author: { '@type': 'Person', name: selectedPost.data?.author_display_name || 'FANHEAT Fan' }, publisher: { '@type': 'Organization', name: 'FANHEAT', logo: { '@type': 'ImageObject', url: `${origin}/images/fanheat-logo.png` } }, mainEntityOfPage: canonicalUrl, datePublished: selectedPost.data?.published_at || selectedPost.data?.created_at, dateModified: selectedPost.data?.updated_at || selectedPost.data?.published_at || selectedPost.data?.created_at } : selectedStar ? { '@context': 'https://schema.org', '@type': 'ProfilePage', name: title, description, url: canonicalUrl, mainEntity: { '@type': 'MusicGroup', name: selectedStar.name, image, description } } : { '@context': 'https://schema.org', '@type': 'WebSite', name: 'FANHEAT', alternateName: ['팬히트', 'Fan Heat'], url: canonicalUrl, description, inLanguage: ['ko-KR', 'en', 'ja'], potentialAction: { '@type': 'SearchAction', target: `${origin}/?q={search_term_string}`, 'query-input': 'required name=search_term_string' } })
   }, [selectedStar, selectedPost, artistDirectory])
   const submitPost = async () => {
     if (!user) { setAuthOpen(true); return }
@@ -3073,6 +3094,7 @@ function FanHeatApp() {
   const nextPost = selectedPostIndex >= 0 && selectedPostIndex < home.posts.length - 1 ? postAt(selectedPostIndex + 1) : null
   const navigatePost = post => {
     setSelectedPost(post)
+    if (post?.data?.id) window.history.pushState({}, '', `/posts/${post.data.id}`)
     window.requestAnimationFrame(() => document.querySelector('.post-detail')?.scrollTo({ top: 0, left: 0, behavior: 'auto' }))
   }
   const updatePostHeat = (postId, voteCount) => {
@@ -3083,6 +3105,7 @@ function FanHeatApp() {
   const openPostDetail = post => {
     setSelectedPost(post)
     if (!post?.data?.id) return
+    if (postPathId() !== post.data.id) window.history.pushState({}, '', `/posts/${post.data.id}`)
     recordPostView(post.data.id).then(viewCount => {
       if (!Number.isFinite(viewCount)) return
       setHome(current => ({ ...current, posts: current.posts.map(([title, image, data]) => [title, image, data?.id === post.data.id ? { ...data, view_count: viewCount } : data]) }))
@@ -3098,7 +3121,7 @@ function FanHeatApp() {
     {writing
       ? <div className="detail-shell compose-shell"><ComposerPreview draft={draft} images={draftImages} /></div>
       : selectedPost
-      ? <div className="detail-shell"><PostDetail post={selectedPost} onClose={() => setSelectedPost(null)} user={user} onLogin={() => setAuthOpen(true)} onEdit={openPostEditor} previousPost={previousPost} nextPost={nextPost} onNavigate={navigatePost} onHeatChange={updatePostHeat} onOpenAuthor={openFanPage} /></div>
+      ? <div className="detail-shell"><PostDetail post={selectedPost} onClose={goHome} user={user} onLogin={() => setAuthOpen(true)} onEdit={openPostEditor} previousPost={previousPost} nextPost={nextPost} onNavigate={navigatePost} onHeatChange={updatePostHeat} onOpenAuthor={openFanPage} /></div>
       : selectedStar
       ? <StarVisual star={selectedStar} onClose={goHome} user={user} onLogin={() => setAuthOpen(true)} />
       : myPage
