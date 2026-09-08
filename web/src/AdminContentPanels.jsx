@@ -1,5 +1,6 @@
 import { setAdminAlbumVisibility, setAdminGalleryReview } from './lib/admin-api'
 import AdminArtistImages from './AdminArtistImages'
+import AdminArtistThumbnail from './AdminArtistThumbnail'
 import { artistStatus, artistStatusLabels, pendingCorrectionCount, filterAdminArtists } from './lib/admin-artist-list'
 import AdminCorrectionRequests from './AdminCorrectionRequests'
 import AdminGallerySource from './AdminGallerySource'
@@ -293,16 +294,58 @@ export function ArtistDetailPage({ initial, onChanged }) {
 }
 
 export function ArtistsPanel({ rows, onReload }) {
+  const [selected, setSelected] = useState([])
+  const [publishing, setPublishing] = useState(false)
+  const [notice, setNotice] = useState('')
+  const [error, setError] = useState('')
   const [requestsOnly, setRequestsOnly] = useState(false)
   const [status, setStatus] = useState('all')
   const [query, setQuery] = useState('')
   const totalRequests = rows.reduce((sum, artist) => sum + pendingCorrectionCount(artist), 0)
   const visible = filterAdminArtists(rows, { status, query, requestsOnly })
+  const eligible = visible.filter(artist => !artist.active)
+  const targets = eligible.filter(artist => selected.includes(artist.id))
+  const publishSelected = async () => {
+    if (publishing || !targets.length) return
+    if (!window.confirm(`선택한 아티스트 ${targets.length}명을 공개할까요? 비공개 앨범·갤러리는 그대로 유지됩니다.`)) return
+    setPublishing(true)
+    setNotice('')
+    setError('')
+    const succeeded = []
+    const failed = []
+    try {
+      for (const artist of targets) {
+        try {
+          await setAdminArtistVisibility(artist.id, true)
+          succeeded.push(artist.id)
+        } catch {
+          failed.push(artist.name_ko || artist.name)
+        }
+      }
+      setSelected(current => current.filter(id => !succeeded.includes(id)))
+      setNotice(`${succeeded.length}명 공개 완료. 비공개 앨범·갤러리는 변경하지 않았습니다.`)
+      if (failed.length) setError(`공개 실패: ${failed.join(', ')}. 권한과 연결 상태를 확인한 후 다시 시도해 주세요.`)
+      try { await onReload() } catch { setError(current => `${current} 목록 새로고침에 실패했습니다. 페이지를 새로고침해 주세요.`.trim()) }
+    } finally {
+      setPublishing(false)
+    }
+  }
   return <>
     <div className="admin-correction-toolbar"><strong>미처리 수정 요청 {totalRequests}건</strong><label><input type="checkbox" checked={requestsOnly} onChange={e => setRequestsOnly(e.target.checked)} /> 요청 있는 아티스트만 보기</label></div>
     <div className="admin-artist-status-filters" role="group" aria-label="아티스트 상태 필터">{Object.entries(artistStatusLabels).map(([key, label]) => <button key={key} type="button" aria-pressed={status === key} onClick={() => setStatus(key)}>{label} <span>{key === 'all' ? rows.length : rows.filter(artist => artistStatus(artist) === key).length}</span></button>)}<span>최근 등록순</span></div>
     <div className="admin-search admin-section-search"><input value={query} onChange={event => setQuery(event.target.value)} placeholder="아티스트명, 소속사, 팬덤 검색" aria-label="아티스트 검색" />{query && <button type="button" onClick={() => setQuery('')}>지우기</button>}<span aria-live="polite">{visible.length}명</span></div>
-    <section className="admin-card-grid">{visible.map(artist => <a href={`/admin/artists/${artist.id}`} key={artist.id}><img src={artist.image_url || '/images/icon_member.png'} alt="" /><span><small className={`admin-artist-status status-${artistStatus(artist)}`}>{artistStatusLabels[artistStatus(artist)]}</small><strong>{artist.name_ko || artist.name}</strong><small>등록 {artist.created_at ? new Date(artist.created_at).toLocaleDateString('ko-KR') : '일자 미상'}</small>{pendingCorrectionCount(artist) > 0 && <mark className="correction-count">수정 요청 {pendingCorrectionCount(artist)}건</mark>}<em>{artist.artist_albums?.length || 0}앨범 · {artist.artist_fans?.length || 0}팬 · {artist.artist_gallery_items?.length || 0}갤러리</em></span><b>상세 페이지</b></a>)}</section>
+    <div className="admin-artist-bulk-actions">
+      <label><input type="checkbox" disabled={publishing || !eligible.length} checked={eligible.length > 0 && targets.length === eligible.length} onChange={event => setSelected(event.target.checked ? eligible.map(artist => artist.id) : [])} /> 현재 목록의 미공개 아티스트 전체 선택</label>
+      <span>{targets.length}명 선택</span>
+      <button type="button" className="admin-primary" disabled={publishing || !targets.length} onClick={publishSelected}>{publishing ? '공개 처리 중…' : '선택한 아티스트 공개'}</button>
+      <button type="button" disabled={publishing || !selected.length} onClick={() => setSelected([])}>선택 해제</button>
+    </div>
+    {notice && <p className="admin-alert" role="status">{notice}</p>}
+    {error && <p className="admin-alert error" role="alert">{error}</p>}
+    <section className="admin-card-grid">{visible.map(artist => <article className="admin-artist-selectable" key={artist.id}>
+      <label className="admin-artist-select"><input type="checkbox" aria-label={`${artist.name_ko || artist.name} 공개 대상으로 선택`} disabled={publishing || artist.active} checked={!artist.active && selected.includes(artist.id)} onChange={event => setSelected(current => event.target.checked ? [...current, artist.id] : current.filter(id => id !== artist.id))} />{artist.active ? '공개 중' : '선택'}</label>
+      <a href={`/admin/artists/${artist.id}`}><AdminArtistThumbnail src={artist.image_url} name={artist.name_ko || artist.name} /><span><small className={`admin-artist-status status-${artistStatus(artist)}`}>{artistStatusLabels[artistStatus(artist)]}</small><strong>{artist.name_ko || artist.name}</strong><small>등록 {artist.created_at ? new Date(artist.created_at).toLocaleDateString('ko-KR') : '일자 미상'}</small>{pendingCorrectionCount(artist) > 0 && <mark className="correction-count">수정 요청 {pendingCorrectionCount(artist)}건</mark>}<em>{artist.artist_albums?.length || 0}앨범 · {artist.artist_fans?.length || 0}팬 · {artist.artist_gallery_items?.length || 0}갤러리</em></span><b>상세 페이지</b></a>
+    </article>)}</section>
     {!visible.length && <p className="admin-empty">조건에 맞는 아티스트가 없습니다.</p>}
   </>
 }

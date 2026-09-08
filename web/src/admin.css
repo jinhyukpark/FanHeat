@@ -119,3 +119,13 @@ body:has(.admin-app){overflow-x:hidden;overflow-y:auto}
 .admin-gallery-review-actions{display:grid;grid-template-columns:1fr 1fr;gap:7px}.admin-gallery-review-actions button{min-width:72px;padding:8px 11px;border:0;border-radius:18px;background:#ece7ff;color:#6043ca;font-size:12px;font-weight:800;cursor:pointer}.admin-gallery-review-actions button:first-child{background:#7657df;color:#fff}.admin-gallery-review-actions button.reject,.admin-gallery-review-actions button.danger{background:#fff0f2;color:#ad3e51}.admin-gallery-review-actions button:disabled{opacity:.5;cursor:wait}.admin-gallery-preview-reason{max-width:720px;color:#554e5a!important}
 .admin-gallery-edit-review-note{margin:12px 0;padding:10px 12px;border-radius:9px;background:#fff5cf;color:#6f5700;font-size:13px;line-height:1.5}
 @media(max-width:760px){.admin-gallery-review-summary{align-items:flex-start;flex-direction:column}.admin-gallery-review-summary dl{width:100%}.admin-gallery-review-summary dl>div{min-width:0;flex:1}.admin-gallery-filters{grid-template-columns:1fr}.admin-gallery-filters>div{justify-content:flex-start;flex-wrap:wrap}.admin-relation-list article.gallery{grid-template-columns:24px 64px minmax(0,1fr)}.admin-relation-list article.gallery>.admin-gallery-preview-trigger{width:64px;height:64px}.admin-gallery-review-actions{grid-column:2/-1;width:100%}}
+.admin-artist-bulk-actions{display:flex;align-items:center;flex-wrap:wrap;gap:12px;margin:16px 0;font-size:14px}
+.admin-artist-bulk-actions label,.admin-artist-select{display:flex;align-items:center;gap:8px;font-size:14px}
+.admin-artist-selectable{min-width:0;border:1px solid var(--admin-line);border-radius:15px;background:#fff;overflow:hidden}
+.admin-artist-selectable:has(input:checked){border-color:#7954ee;box-shadow:0 0 0 1px #7954ee}
+.admin-artist-select{padding:12px 16px}
+.admin-artist-selectable>a{min-height:180px;padding:0 16px 16px;display:grid;grid-template-columns:110px minmax(0,1fr);gap:15px;color:#302a34;text-decoration:none}
+.admin-artist-selectable>a>b{grid-column:2;color:#6e52da;font-size:13px}
+.admin-artist-bulk-actions input,.admin-artist-select input{width:18px;height:18px;accent-color:#7954ee}
+.admin-artist-bulk-actions :focus-visible,.admin-artist-selectable :focus-visible{outline:2px solid #7954ee;outline-offset:3px}
+.admin-card-grid .admin-artist-image-error{width:110px;height:145px;display:flex;align-items:center;justify-content:center;background:#eeeaf5;border-radius:10px;color:#635773;font-size:12px;text-align:center}

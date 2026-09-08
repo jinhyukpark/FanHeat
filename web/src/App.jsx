@@ -1922,7 +1922,7 @@ function ImageLightbox({ images, initialIndex, title, onClose }) {
   </div>, document.body)
 }
 
-const heatTierFor = count => count >= 2000 ? 'viral' : count >= 1000 ? 'mint' : count >= 500 ? 'coral' : count >= 100 ? 'yellow' : 'soft'
+const heatTierFor = count => count >= 151 ? 'viral' : count >= 100 ? 'mint' : count >= 31 ? 'coral' : count >= 11 ? 'yellow' : 'soft'
 
 function HeatVote({ initialCount, postId, user, onLogin, onCountChange }) {
   const [count, setCount] = useState(initialCount)
@@ -1963,12 +1963,13 @@ function PostMetaIcon({ type }) {
   return <svg className="post-meta-icon" viewBox="0 0 24 24" aria-hidden="true">{paths[type]}</svg>
 }
 
-function PostMetadata({ viewCount = 0, giftCount = 0, commentCount = 0, authorId = 'FANHEAT', className = '' }) {
+function PostMetadata({ viewCount = 0, giftCount = 0, commentCount = 0, authorId = 'FANHEAT', publishedAt, className = '' }) {
   return <div className={`stats post-meta ${className}`.trim()}>
     <span title="조회수" aria-label={`조회수 ${Number(viewCount).toLocaleString()}`}><PostMetaIcon type="views" />{Number(viewCount).toLocaleString()}</span>
     <span title="선물" aria-label={`선물 ${Number(giftCount).toLocaleString()}개`}><PostMetaIcon type="gifts" />{Number(giftCount).toLocaleString()}</span>
     <span title="댓글" aria-label={`댓글 ${Number(commentCount).toLocaleString()}개`}><PostMetaIcon type="comments" />{Number(commentCount).toLocaleString()}</span>
     <span className="post-meta-author" title="작성자">@{String(authorId).replace(/^@/, '')}</span>
+    {publishedAt && <time className="post-meta-time" dateTime={publishedAt} title={new Date(publishedAt).toLocaleString('ko-KR')}>{relativePostTime(publishedAt)}</time>}
   </div>
 }
 
@@ -2025,7 +2026,7 @@ function Feed({ query, filters, onSelect, items = [], user, onLogin, onHeatChang
       <header className="post-mobile-header"><span className="post-mobile-avatar" aria-hidden="true"><b>{authorName.slice(0, 1).toUpperCase()}</b>{authorAvatar && <img src={assetSrc(authorAvatar)} alt="" onError={event => { event.currentTarget.hidden = true }} />}</span><div><strong>{authorName}</strong><small>@{authorId} · {relativePostTime(data?.published_at || data?.created_at)}</small></div><button type="button" onClick={event => event.stopPropagation()} aria-label="게시물 메뉴">•••</button></header>
       <div className="post-mobile-copy">{title && <h3>{localizeTitle(title)}</h3>}{data?.summary && <p>{data.summary}</p>}</div>
       <PostThumbnail slides={postListMediaSlides(title, image, data, originalIndex)} title={localizeTitle(title)} />
-      <div className="post-copy">{title && <h3>{localizeTitle(title)}</h3>}{data?.summary && <p>{data.summary}</p>}<PostMetadata viewCount={viewCount} giftCount={giftCount} commentCount={commentCount} authorId={authorId} /></div>
+      <div className="post-copy">{title && <h3>{localizeTitle(title)}</h3>}{data?.summary && <p>{data.summary}</p>}<PostMetadata viewCount={viewCount} giftCount={giftCount} commentCount={commentCount} authorId={authorId} publishedAt={data?.published_at || data?.created_at} /></div>
       <PostMetadata className="post-mobile-actions" viewCount={viewCount} giftCount={giftCount} commentCount={commentCount} authorId={authorId} />
       <HeatVote initialCount={data?.vote_count ?? 0} postId={data?.id} user={user} onLogin={onLogin} onCountChange={onHeatChange} />
     </article>})}</div>
