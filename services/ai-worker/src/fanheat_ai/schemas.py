@@ -115,6 +115,9 @@ class EngagementRunResult(BaseModel):
     comments_published: int
     post_heats_completed: int
     comment_likes_completed: int
+    artist_follows_completed: int = 0
+    artist_fans_registered: int = 0
+    artist_actions_skipped: int = 0
     actions_failed: int
     plans_cancelled_for_human_comments: int
     deferred: bool = False

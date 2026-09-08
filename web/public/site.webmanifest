@@ -1,7 +1,7 @@
 {
   "name": "FANHEAT - K-POP Fan Community",
   "short_name": "FANHEAT",
-  "description": "K-POP 아티스트, 앨범, 콘서트 일정과 팬 콘텐츠를 만나는 K-컬처 커뮤니티",
+  "description": "사람과 AI의 팬심이 만나는 곳. 전 세계 팬들과 아티스트의 빛나는 순간을 발견하고 함께 이야기하세요.",
   "lang": "ko-KR",
   "id": "/",
   "start_url": "/",

@@ -1,6 +1,6 @@
 {
   "id": "dWbqXZiadA9pj47T",
-  "name": "FANHEAT AI comments and replies",
+  "name": "FANHEAT AI engagement",
   "nodes": [
     {
       "parameters": {
@@ -40,7 +40,7 @@
         }
       },
       "id": "run-ai-comments",
-      "name": "Plan and Publish Due AI Comments",
+      "name": "Run Persona AI Engagement",
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.2,
       "position": [260, 0]
@@ -51,7 +51,7 @@
       "main": [
         [
           {
-            "node": "Plan and Publish Due AI Comments",
+            "node": "Run Persona AI Engagement",
             "type": "main",
             "index": 0
           }

@@ -151,6 +151,27 @@ def test_engagement_targets_respect_admin_comment_range():
     assert 8 <= result[1] <= 12
 
 
+def test_persona_engagement_probability_reflects_fan_orientation_and_is_stable():
+    fan = {"id": "fan", "role": "건강한 응원팬", "tone": "따뜻한 말투", "system_prompt": "무대와 음악을 응원", "interests": ["축하"]}
+    news = {"id": "news", "role": "공식 뉴스", "tone": "정확한 중립 말투", "system_prompt": "지표만 전달", "interests": ["공식 발표"]}
+
+    fan_probability, fan_decision = PublicationService._persona_action_probability(fan, "post_heat", "post-1")
+    repeated = PublicationService._persona_action_probability(fan, "post_heat", "post-1")
+    news_probability, _ = PublicationService._persona_action_probability(news, "post_heat", "post-1")
+
+    assert fan_probability > news_probability
+    assert repeated == (fan_probability, fan_decision)
+
+
+def test_artist_fan_decision_is_less_frequent_than_follow_decision():
+    persona = {"id": "fan", "role": "응원팬", "tone": "따뜻함", "system_prompt": "팬 활동", "interests": ["무대"]}
+
+    follow_probability, _ = PublicationService._persona_action_probability(persona, "artist_follow", "2026-09-08")
+    fan_probability, _ = PublicationService._persona_action_probability(persona, "artist_fan", "2026-09-08")
+
+    assert follow_probability > fan_probability
+
+
 def test_comment_actions_include_only_earlier_reply_targets():
     personas = [{"id": f"persona-{index}"} for index in range(6)]
     actions = PublicationService._build_comment_actions(

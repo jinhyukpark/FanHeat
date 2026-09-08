@@ -220,14 +220,133 @@ class PublicationService:
         plans = self._backfill_engagement_plans(limit)
         self._schedule_human_comment_replies(limit)
         completed, failed = self._process_due_engagement_actions(limit)
+        artist_actions = self._run_daily_artist_engagement(limit)
         return EngagementRunResult(
             plans_created=plans,
             comments_published=completed["comment"],
             post_heats_completed=completed["post_heat"],
             comment_likes_completed=completed["comment_like"],
+            artist_follows_completed=artist_actions["follows"],
+            artist_fans_registered=artist_actions["fans"],
+            artist_actions_skipped=artist_actions["skipped"],
             actions_failed=failed,
             plans_cancelled_for_human_comments=0,
         )
+
+    @staticmethod
+    def _persona_action_probability(persona: dict, action: str, seed: str) -> tuple[float, bool]:
+        """Return a stable persona-dependent decision for an optional social action."""
+        identity = " ".join(
+            str(persona.get(field) or "") for field in ("role", "tone", "system_prompt", "interests")
+        ).casefold()
+        base = {"post_heat": 0.55, "artist_follow": 0.22, "artist_fan": 0.10}[action]
+        if any(word in identity for word in ("응원", "축하", "팬", "감상", "무대")):
+            base += {"post_heat": 0.22, "artist_follow": 0.20, "artist_fan": 0.16}[action]
+        if any(word in identity for word in ("뉴스", "공식", "정확", "데이터", "지표", "중립")):
+            base -= {"post_heat": 0.18, "artist_follow": 0.10, "artist_fan": 0.07}[action]
+        probability = max(0.03, min(0.92, base))
+        rng = random.Random(f"{seed}:{persona['id']}:{action}")
+        return probability, rng.random() < probability
+
+    def _run_daily_artist_engagement(self, limit: int) -> dict[str, int]:
+        counts = {"follows": 0, "fans": 0, "skipped": 0}
+        with self.engine.begin() as connection:
+            personas = connection.execute(
+                text(
+                    """
+                    select p.id, p.profile_id, p.role, p.tone, p.system_prompt, p.interests
+                    from public.ai_personas p
+                    join public.profiles profile on profile.id = p.profile_id and profile.is_ai
+                    where p.enabled and p.profile_id is not null
+                      and not exists (
+                        select 1 from public.ai_artist_engagement_actions action
+                        where action.persona_id = p.id
+                          and action.action_date = ((now() at time zone 'Asia/Seoul')::date)
+                      )
+                    order by p.last_used_at nulls first, p.id
+                    limit :limit
+                    """
+                ),
+                {"limit": limit},
+            ).mappings().all()
+            action_date = connection.execute(
+                text("select ((now() at time zone 'Asia/Seoul')::date)::text")
+            ).scalar_one()
+            for raw_persona in personas:
+                persona = dict(raw_persona)
+                follow_probability, follow_selected = self._persona_action_probability(
+                    persona, "artist_follow", action_date
+                )
+                fan_probability, fan_selected = self._persona_action_probability(
+                    persona, "artist_fan", action_date
+                )
+                # Joining a FAN roster is a stronger form of interest and also follows the artist.
+                follow_selected = follow_selected or fan_selected
+                artist = None
+                if follow_selected:
+                    artist = connection.execute(
+                        text(
+                            """
+                            select a.id
+                            from public.artists a
+                            where a.active
+                              and (
+                                not exists (select 1 from public.artist_followers f where f.artist_id = a.id and f.user_id = :profile_id)
+                                or (:fan_selected and not exists (select 1 from public.artist_fans f where f.artist_id = a.id and f.profile_id = :profile_id))
+                              )
+                            order by
+                              (coalesce(a.follower_count, 0) + coalesce(a.visitor_today, 0) * 2) desc,
+                              md5(a.id::text || ':' || cast(:persona_id as text) || ':' || :action_date)
+                            limit 1
+                            """
+                        ),
+                        {"profile_id": persona["profile_id"], "fan_selected": fan_selected, "persona_id": persona["id"], "action_date": action_date},
+                    ).mappings().first()
+                if artist is None:
+                    follow_selected = False
+                    fan_selected = False
+                    counts["skipped"] += 1
+                follow_completed = False
+                fan_completed = False
+                if artist is not None and follow_selected:
+                    follow_completed = bool(connection.execute(
+                        text("insert into public.artist_followers (artist_id, user_id) values (:artist_id, :profile_id) on conflict do nothing returning artist_id"),
+                        {"artist_id": artist["id"], "profile_id": persona["profile_id"]},
+                    ).scalar_one_or_none())
+                    counts["follows"] += int(follow_completed)
+                if artist is not None and fan_selected:
+                    profile = connection.execute(
+                        text("select display_name, avatar_url from public.profiles where id = :profile_id"),
+                        {"profile_id": persona["profile_id"]},
+                    ).mappings().one()
+                    handle = "@" + "_".join(str(profile["display_name"] or "FAN").replace("@", "").split())
+                    fan_completed = bool(connection.execute(
+                        text(
+                            """
+                            insert into public.artist_fans (artist_id, profile_id, display_name, handle, avatar_url, active)
+                            values (:artist_id, :profile_id, :display_name, :handle, :avatar_url, true)
+                            on conflict (artist_id, profile_id) do nothing returning id
+                            """
+                        ),
+                        {"artist_id": artist["id"], "profile_id": persona["profile_id"], "display_name": profile["display_name"] or "FAN", "handle": handle, "avatar_url": profile["avatar_url"]},
+                    ).scalar_one_or_none())
+                    counts["fans"] += int(fan_completed)
+                connection.execute(
+                    text(
+                        """
+                        insert into public.ai_artist_engagement_actions (
+                          persona_id, profile_id, artist_id, action_date, follow_selected, fan_selected,
+                          follow_completed, fan_completed, decision_context, status
+                        ) values (
+                          :persona_id, :profile_id, cast(:artist_id as bigint), cast(:action_date as date), :follow_selected, :fan_selected,
+                          :follow_completed, :fan_completed, cast(:context as jsonb),
+                          :status
+                        ) on conflict (persona_id, action_date) do nothing
+                        """
+                    ),
+                    {"persona_id": persona["id"], "profile_id": persona["profile_id"], "artist_id": artist["id"] if artist else None, "action_date": action_date, "follow_selected": follow_selected, "fan_selected": fan_selected, "follow_completed": follow_completed, "fan_completed": fan_completed, "context": json.dumps({"follow_probability": follow_probability, "fan_probability": fan_probability, "policy": "persona_daily_v1"}), "status": "completed" if artist else "skipped"},
+                )
+        return counts
 
     def cast_daily_ai_votes(self) -> dict:
         """Cast at most one Seoul-calendar-day vote for every enabled AI profile.
@@ -825,7 +944,7 @@ class PublicationService:
             personas = connection.execute(
                 text(
                     """
-                    select p.id, p.profile_id, p.display_name, p.role, p.tone, p.system_prompt
+                    select p.id, p.profile_id, p.display_name, p.role, p.tone, p.system_prompt, p.interests
                     from ai_personas p
                     join profiles pr on pr.id = p.profile_id and pr.is_ai
                     where p.enabled and p.profile_id is not null and p.id <> :author_persona_id
@@ -849,9 +968,12 @@ class PublicationService:
             starts_at = datetime.now(timezone.utc) + timedelta(minutes=self.settings.comment_min_delay_minutes)
             duration_hours = 6 + round(score * 42)
             ends_at = starts_at + timedelta(hours=duration_hours)
-            heat_personas = list(personas)
+            heat_personas = [
+                persona for persona in personas
+                if self._persona_action_probability(dict(persona), "post_heat", str(post["id"]))[1]
+            ]
             rng.shuffle(heat_personas)
-            target_heats = max(1, min(len(heat_personas), round(1 + score * (len(heat_personas) - 1))))
+            target_heats = min(len(heat_personas), round(score * len(heat_personas)))
             plan_id = str(uuid.uuid4())
             connection.execute(
                 text(

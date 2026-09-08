@@ -30,7 +30,12 @@
 .my-resources dl dd b,.fan-cred-summary dd b{font-size:15px;line-height:1.35}
 .my-resources dl dd small{margin-top:4px;font-size:var(--fh-type-caption);line-height:1.4}
 .my-intro{font-size:15px;line-height:1.85;white-space:pre-line}
+.my-profile-empty-intro{width:100%;padding:15px 17px;border:1px dashed #cfc4df;border-radius:12px;background:#faf8ff;color:#7059c9;text-align:left;cursor:pointer}
+.my-profile-empty-intro:hover,.my-profile-empty-intro:focus-visible{border-color:#8064ec;background:#f2edff;outline:none}
 .my-cover-copy p{max-width:560px;margin-bottom:16px;display:-webkit-box;overflow:hidden;color:#fff;font-size:var(--fh-type-title);font-weight:500;line-height:1.55;letter-spacing:-.015em;text-shadow:0 1px 8px #0009;word-break:keep-all;-webkit-box-orient:vertical;-webkit-line-clamp:2}
+.my-profile-empty-headline{max-width:560px;margin:0 0 16px;padding:6px 10px;border:1px dashed #ffffff9c;border-radius:8px;background:#15111b42;color:#fff;font-size:var(--fh-type-body);line-height:1.5;text-align:left;text-shadow:0 1px 8px #0009;cursor:pointer}
+.my-profile-empty-headline:hover,.my-profile-empty-headline:focus-visible{border-color:#fff;background:#7659e6d9;outline:none}
+.my-cover-copy p.is-empty,.my-intro.is-empty{opacity:.78;font-style:normal}
 .my-cover-copy>span{font-size:var(--fh-type-caption)}
 .my-profile-socials a{width:36px;height:36px;display:grid;place-items:center;border:1px solid #ffffff24;border-radius:50%;background:#111;color:#fff;text-decoration:none;box-shadow:0 5px 14px #09060e2e;transition:transform .16s,filter .16s}
 .my-profile-socials svg{width:20px;height:20px;display:block;overflow:visible;fill:currentColor;stroke:none}

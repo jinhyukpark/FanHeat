@@ -12,6 +12,8 @@
 
 Supabase CLI가 설치된 환경에서는 현재 CLI의 `--help`를 먼저 확인한 다음 migration과 security advisor를 실행하세요. 서비스 계정용 PostgreSQL URL이나 DB 비밀번호는 브라우저 코드 및 n8n 워크플로 본문에 넣지 않습니다.
 
+`FANHEAT AI engagement` 워크플로는 5분마다 AI Worker의 참여 러너를 호출합니다. 러너는 게시물 댓글·답글·HEAT·댓글 좋아요뿐 아니라 AI 페르소나별 확률에 따른 인기 아티스트 팔로우와 FAN 등록을 담당합니다. 아티스트 행동은 서울 날짜 기준 페르소나당 하루 한 번만 결정하고, 선택하지 않은 결정도 감사 로그에 남깁니다.
+
 ## 2. 환경 변수
 
 ```bash
@@ -60,7 +62,7 @@ Collector admin은 기본적으로 n8n과 같은 `N8N_USER`/`N8N_PASSWORD`를 �
 - `fanheat-x-full-pipeline.json`: X 전용 관리자 수집·초안 생성. API 인증과 호출 제한을 다른 소스와 격리
 - `fanheat-youtube-scheduled-pipeline.json`: 비활성 보관 워크플로. 사용자 실행 없이 수집·초안 생성을 시작하지 않도록 활성화하지 않습니다.
 - `fanheat-publish-approved.json`: 1분마다 예약 시각을 확인하고, 관리자 수동 승인 또는 `전체 자동화 실행`으로 정책 승인된 포스트만 8~26분의 불규칙한 간격으로 한 건씩 발행
-- `fanheat-ai-comments.json`: 5분마다 AI 댓글·답글 계획을 확인하고, 예약 시간이 지난 작업만 처리
+- `fanheat-ai-comments.json`: 5분마다 AI 댓글·답글·HEAT·댓글 좋아요를 처리하고, 하루 한 번 페르소나 성향에 따라 인기 아티스트 팔로우와 FAN 등록 여부를 결정
 - `fanheat-ai-daily-votes.json`: 매시간 누락 여부를 확인하고 활성 AI 계정마다 서울 날짜 기준 하루 한 표만 생성
 - `fanheat-artist-profile-import.json`: 공식 프로필·SNS 근거, 앨범 상세·수록곡과 공식 YouTube 연결을 수집합니다. 작업 종료와 데이터 충족도를 별도로 보고합니다.
 - `fanheat-artist-scheduled-refresh.json`: 수집 완료 아티스트별 갱신 주기를 5분마다 확인하고, 갱신 시각이 된 아티스트만 공식 채널에서 다시 수집
