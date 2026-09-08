@@ -144,6 +144,8 @@ def run_engagement(request: EngagementRunRequest) -> EngagementRunResult:
                 artist_follows_completed=0,
                 artist_fans_registered=0,
                 artist_actions_skipped=0,
+                friend_requests_accepted=0,
+                friend_requests_deferred=0,
                 actions_failed=0,
                 plans_cancelled_for_human_comments=0,
                 deferred=True,

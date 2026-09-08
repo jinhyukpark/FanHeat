@@ -284,7 +284,14 @@ export async function deleteAdminAlbumTrack(id) {
 }
 
 export async function loadAdminPosts() {
-  return throwIfError(await requireSupabase().from('posts').select('id,title,summary,body_html,tags,reference_url,source_label,source_url,source_links,inline_image_sources,audio_url,audio_title,audio_artist,artist_id,author_display_name,status,view_count,vote_count,created_at,published_at,updated_at,post_images(id,image_url,sort_order,source_label,source_url),comments(count)').order('created_at', { ascending: false }))
+  const client = requireSupabase()
+  const posts = throwIfError(await client.from('posts').select('id,title,summary,body_html,tags,reference_url,source_label,source_url,source_links,inline_image_sources,audio_url,audio_title,audio_artist,artist_id,author_id,author_display_name,status,view_count,vote_count,created_at,published_at,updated_at,post_images(id,image_url,sort_order,source_label,source_url),comments(count)').order('created_at', { ascending: false }))
+  const authorIds = [...new Set(posts.map(post => post.author_id).filter(Boolean))]
+  const authors = authorIds.length
+    ? throwIfError(await client.from('profiles').select('id,is_ai').in('id', authorIds))
+    : []
+  const aiByAuthor = new Map(authors.map(author => [author.id, Boolean(author.is_ai)]))
+  return posts.map(post => ({ ...post, author_is_ai: aiByAuthor.get(post.author_id) || false }))
 }
 
 export async function loadAdminPostDetail(id) {

@@ -163,6 +163,44 @@ def test_persona_engagement_probability_reflects_fan_orientation_and_is_stable()
     assert repeated == (fan_probability, fan_decision)
 
 
+def test_post_heat_selection_guarantees_a_visible_minimum_when_personas_exist():
+    personas = [
+        {"id": f"persona-{index}", "role": "공식 뉴스", "tone": "중립", "system_prompt": "정확한 데이터", "interests": []}
+        for index in range(12)
+    ]
+
+    selected = PublicationService._select_heat_personas(personas, "member-post")
+
+    assert len(selected) >= 5
+    assert len({persona["id"] for persona in selected}) == len(selected)
+
+
+def test_engagement_runner_backfills_member_posts():
+    runner_source = inspect.getsource(PublicationService.run_engagement)
+    backfill_source = inspect.getsource(PublicationService._backfill_member_post_engagement_plans)
+
+    assert "_backfill_member_post_engagement_plans" in runner_source
+    assert "author_profile.is_ai is false" in backfill_source
+    assert "plan.post_id = po.id" in backfill_source
+
+
+def test_new_post_heat_target_is_not_reduced_by_zero_popularity_score():
+    source = inspect.getsource(PublicationService._create_engagement_plan_for_post)
+
+    assert "target_heats = min(50, len(heat_personas))" in source
+    assert "round(score * len(heat_personas))" not in source
+
+
+def test_engagement_runner_repairs_existing_zero_heat_plans():
+    source = inspect.getsource(PublicationService.run_engagement)
+    repair_source = inspect.getsource(PublicationService._repair_zero_heat_plans)
+
+    assert "_repair_zero_heat_plans" in source
+    assert "target_post_heats = 0" in repair_source
+    assert "action_type = 'post_heat'" in repair_source
+    assert "on conflict do nothing" in repair_source
+
+
 def test_artist_fan_decision_is_less_frequent_than_follow_decision():
     persona = {"id": "fan", "role": "응원팬", "tone": "따뜻함", "system_prompt": "팬 활동", "interests": ["무대"]}
 
@@ -170,6 +208,21 @@ def test_artist_fan_decision_is_less_frequent_than_follow_decision():
     fan_probability, _ = PublicationService._persona_action_probability(persona, "artist_fan", "2026-09-08")
 
     assert follow_probability > fan_probability
+
+
+def test_friend_acceptance_probability_is_persona_dependent_and_audited():
+    fan = {"id": "fan", "role": "응원팬", "tone": "따뜻함", "system_prompt": "팬과 소통", "interests": ["무대"]}
+    news = {"id": "news", "role": "공식 뉴스", "tone": "중립", "system_prompt": "정확한 데이터", "interests": ["지표"]}
+
+    fan_probability, _ = PublicationService._persona_action_probability(fan, "friend_accept", "request")
+    news_probability, _ = PublicationService._persona_action_probability(news, "friend_accept", "request")
+    source = inspect.getsource(PublicationService._run_ai_friend_request_decisions)
+
+    assert fan_probability > news_probability
+    assert "ai_friend_request_decisions" in source
+    assert "request.status = 'pending'" in source
+    assert "set status = 'accepted'" in source
+    assert "on conflict (owner_id, friend_id) do update" in source
 
 
 def test_comment_actions_include_only_earlier_reply_targets():

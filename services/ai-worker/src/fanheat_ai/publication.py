@@ -218,9 +218,12 @@ class PublicationService:
     def run_engagement(self, limit: int = 30) -> EngagementRunResult:
         self._resume_human_comment_plans()
         plans = self._backfill_engagement_plans(limit)
+        plans += self._backfill_member_post_engagement_plans(limit)
+        self._repair_zero_heat_plans(limit)
         self._schedule_human_comment_replies(limit)
         completed, failed = self._process_due_engagement_actions(limit)
         artist_actions = self._run_daily_artist_engagement(limit)
+        friend_actions = self._run_ai_friend_request_decisions(limit)
         return EngagementRunResult(
             plans_created=plans,
             comments_published=completed["comment"],
@@ -229,6 +232,8 @@ class PublicationService:
             artist_follows_completed=artist_actions["follows"],
             artist_fans_registered=artist_actions["fans"],
             artist_actions_skipped=artist_actions["skipped"],
+            friend_requests_accepted=friend_actions["accepted"],
+            friend_requests_deferred=friend_actions["deferred"],
             actions_failed=failed,
             plans_cancelled_for_human_comments=0,
         )
@@ -239,14 +244,25 @@ class PublicationService:
         identity = " ".join(
             str(persona.get(field) or "") for field in ("role", "tone", "system_prompt", "interests")
         ).casefold()
-        base = {"post_heat": 0.55, "artist_follow": 0.22, "artist_fan": 0.10}[action]
+        base = {"post_heat": 0.68, "artist_follow": 0.22, "artist_fan": 0.10, "friend_accept": 0.58}[action]
         if any(word in identity for word in ("응원", "축하", "팬", "감상", "무대")):
-            base += {"post_heat": 0.22, "artist_follow": 0.20, "artist_fan": 0.16}[action]
+            base += {"post_heat": 0.20, "artist_follow": 0.20, "artist_fan": 0.16, "friend_accept": 0.18}[action]
         if any(word in identity for word in ("뉴스", "공식", "정확", "데이터", "지표", "중립")):
-            base -= {"post_heat": 0.18, "artist_follow": 0.10, "artist_fan": 0.07}[action]
-        probability = max(0.03, min(0.92, base))
+            base -= {"post_heat": 0.10, "artist_follow": 0.10, "artist_fan": 0.07, "friend_accept": 0.14}[action]
+        probability = max(0.40 if action == "post_heat" else 0.03, min(0.95, base))
         rng = random.Random(f"{seed}:{persona['id']}:{action}")
         return probability, rng.random() < probability
+
+    @classmethod
+    def _select_heat_personas(cls, personas: list[dict], seed: str) -> list[dict]:
+        selected = [persona for persona in personas if cls._persona_action_probability(persona, "post_heat", seed)[1]]
+        minimum = min(5, len(personas))
+        if len(selected) < minimum:
+            selected_ids = {str(persona["id"]) for persona in selected}
+            remainder = [persona for persona in personas if str(persona["id"]) not in selected_ids]
+            remainder.sort(key=lambda persona: random.Random(f"{seed}:{persona['id']}:heat-floor").random())
+            selected.extend(remainder[: minimum - len(selected)])
+        return selected[:50]
 
     def _run_daily_artist_engagement(self, limit: int) -> dict[str, int]:
         counts = {"follows": 0, "fans": 0, "skipped": 0}
@@ -345,6 +361,104 @@ class PublicationService:
                         """
                     ),
                     {"persona_id": persona["id"], "profile_id": persona["profile_id"], "artist_id": artist["id"] if artist else None, "action_date": action_date, "follow_selected": follow_selected, "fan_selected": fan_selected, "follow_completed": follow_completed, "fan_completed": fan_completed, "context": json.dumps({"follow_probability": follow_probability, "fan_probability": fan_probability, "policy": "persona_daily_v1"}), "status": "completed" if artist else "skipped"},
+                )
+        return counts
+
+    def _run_ai_friend_request_decisions(self, limit: int) -> dict[str, int]:
+        """Let each AI persona reconsider each pending request once per Seoul day."""
+        counts = {"accepted": 0, "deferred": 0}
+        with self.engine.begin() as connection:
+            decision_date = connection.execute(
+                text("select ((now() at time zone 'Asia/Seoul')::date)::text")
+            ).scalar_one()
+            requests = connection.execute(
+                text(
+                    """
+                    select request.owner_id as requester_id,
+                           request.friend_id as ai_profile_id,
+                           persona.id as id, persona.id as persona_id, persona.role, persona.tone,
+                           persona.system_prompt, persona.interests,
+                           requester.display_name as requester_name
+                    from public.friendships request
+                    join public.profiles ai_profile
+                      on ai_profile.id = request.friend_id and ai_profile.is_ai
+                    join public.ai_personas persona
+                      on persona.profile_id = ai_profile.id and persona.enabled
+                    join public.profiles requester on requester.id = request.owner_id
+                    where request.status = 'pending'
+                      and not exists (
+                        select 1 from public.ai_friend_request_decisions decision
+                        where decision.requester_id = request.owner_id
+                          and decision.ai_profile_id = request.friend_id
+                          and decision.decision_date = cast(:decision_date as date)
+                      )
+                    order by request.created_at
+                    for update of request skip locked
+                    limit :limit
+                    """
+                ),
+                {"decision_date": decision_date, "limit": limit},
+            ).mappings().all()
+            for raw_request in requests:
+                request = dict(raw_request)
+                probability, accepted = self._persona_action_probability(
+                    request, "friend_accept", f"{decision_date}:{request['requester_id']}"
+                )
+                decision = "accepted" if accepted else "deferred"
+                if accepted:
+                    updated = connection.execute(
+                        text(
+                            """
+                            update public.friendships
+                            set status = 'accepted', accepted_at = now()
+                            where owner_id = :requester_id
+                              and friend_id = :ai_profile_id
+                              and status = 'pending'
+                            returning owner_id
+                            """
+                        ),
+                        request,
+                    ).scalar_one_or_none()
+                    if updated:
+                        connection.execute(
+                            text(
+                                """
+                                insert into public.friendships (
+                                  owner_id, friend_id, status, accepted_at
+                                ) values (
+                                  :ai_profile_id, :requester_id, 'accepted', now()
+                                ) on conflict (owner_id, friend_id) do update
+                                  set status = 'accepted', accepted_at = excluded.accepted_at
+                                """
+                            ),
+                            request,
+                        )
+                        counts["accepted"] += 1
+                else:
+                    counts["deferred"] += 1
+                connection.execute(
+                    text(
+                        """
+                        insert into public.ai_friend_request_decisions (
+                          requester_id, ai_profile_id, persona_id, decision_date,
+                          decision, probability, decision_context
+                        ) values (
+                          :requester_id, :ai_profile_id, :persona_id,
+                          cast(:decision_date as date), :decision, :probability,
+                          cast(:decision_context as jsonb)
+                        ) on conflict do nothing
+                        """
+                    ),
+                    {
+                        **request,
+                        "decision_date": decision_date,
+                        "decision": decision,
+                        "probability": probability,
+                        "decision_context": json.dumps(
+                            {"policy": "persona_friend_request_daily_v1", "requester_name": request["requester_name"]},
+                            ensure_ascii=False,
+                        ),
+                    },
                 )
         return counts
 
@@ -642,6 +756,119 @@ class PublicationService:
             ).scalars().all()
         return sum(self._create_engagement_plan_for_post(str(draft_id)) for draft_id in draft_ids)
 
+    def _backfill_member_post_engagement_plans(self, limit: int) -> int:
+        with self.engine.connect() as connection:
+            post_ids = connection.execute(
+                text(
+                    """
+                    select po.id
+                    from posts po
+                    join profiles author_profile
+                      on author_profile.id = po.author_id and author_profile.is_ai is false
+                    where po.status = 'published'
+                      and not exists (
+                        select 1 from ai_engagement_plans plan where plan.post_id = po.id
+                      )
+                    order by coalesce(po.published_at, po.created_at)
+                    limit :limit
+                    """
+                ),
+                {"limit": limit},
+            ).scalars().all()
+        return sum(self._create_engagement_plan_for_post(post_id=str(post_id)) for post_id in post_ids)
+
+    def _repair_zero_heat_plans(self, limit: int) -> int:
+        """Restore HEAT actions erased by the former popularity double-scaling bug."""
+        repaired = 0
+        with self.engine.begin() as connection:
+            plans = connection.execute(
+                text(
+                    """
+                    select p.id, p.post_id, p.author_persona_id
+                    from ai_engagement_plans p
+                    where p.status = 'active'
+                      and p.ends_at > now()
+                      and p.target_post_heats = 0
+                      and not exists (
+                        select 1 from ai_engagement_actions a
+                        where a.plan_id = p.id and a.action_type = 'post_heat'
+                      )
+                    order by p.created_at
+                    for update of p skip locked
+                    limit :limit
+                    """
+                ),
+                {"limit": limit},
+            ).mappings().all()
+            for plan in plans:
+                personas = connection.execute(
+                    text(
+                        """
+                        select persona.id, persona.role, persona.tone,
+                               persona.system_prompt, persona.interests
+                        from ai_personas persona
+                        join profiles profile
+                          on profile.id = persona.profile_id and profile.is_ai
+                        where persona.enabled
+                          and persona.profile_id is not null
+                          and (:author_persona_id is null or persona.id <> :author_persona_id)
+                        order by persona.id
+                        """
+                    ),
+                    {"author_persona_id": plan["author_persona_id"]},
+                ).mappings().all()
+                selected = self._select_heat_personas([dict(persona) for persona in personas], str(plan["post_id"]))
+                if not selected:
+                    continue
+                rng = random.Random(f"repair:{plan['post_id']}")
+                actions = [
+                    {
+                        "id": str(uuid.uuid4()),
+                        "plan_id": plan["id"],
+                        "persona_id": persona["id"],
+                        "scheduled_at": datetime.now(timezone.utc)
+                        + timedelta(minutes=rng.uniform(0, 10)),
+                    }
+                    for persona in selected
+                ]
+                connection.execute(
+                    text(
+                        """
+                        insert into ai_engagement_actions (
+                          id, plan_id, persona_id, action_type, scheduled_at
+                        ) values (
+                          cast(:id as uuid), :plan_id, :persona_id,
+                          'post_heat', :scheduled_at
+                        ) on conflict do nothing
+                        """
+                    ),
+                    actions,
+                )
+                connection.execute(
+                    text(
+                        """
+                        update ai_engagement_plans
+                        set target_post_heats = :target,
+                            rationale = rationale || cast(:repair as jsonb),
+                            updated_at = now()
+                        where id = :id
+                        """
+                    ),
+                    {
+                        "id": plan["id"],
+                        "target": len(selected),
+                        "repair": json.dumps(
+                            {
+                                "heat_repaired": True,
+                                "heat_policy": "persona_probability_v1",
+                                "heat_selected_personas": len(selected),
+                            }
+                        ),
+                    },
+                )
+                repaired += 1
+        return repaired
+
     def _publish_one(self, draft_id: str) -> str:
         with self.engine.begin() as connection:
             draft = connection.execute(
@@ -909,14 +1136,16 @@ class PublicationService:
             )
         return actions
 
-    def _create_engagement_plan_for_post(self, source_draft_id: str) -> int:
+    def _create_engagement_plan_for_post(self, source_draft_id: str | None = None, post_id: str | None = None) -> int:
+        if not source_draft_id and not post_id:
+            return 0
         with self.engine.begin() as connection:
             connection.execute(
-                text("select pg_advisory_xact_lock(hashtextextended(:source_draft_id, 0))"),
-                {"source_draft_id": source_draft_id},
+                text("select pg_advisory_xact_lock(hashtextextended(:lock_key, 0))"),
+                {"lock_key": source_draft_id or post_id},
             )
-            post = connection.execute(
-                text(
+            if source_draft_id:
+                post = connection.execute(text(
                     """
                     select d.published_post_id as id, d.title, d.body, d.persona_id,
                            coalesce(max(ms.views), 0) as views,
@@ -931,14 +1160,28 @@ class PublicationService:
                     where d.id = cast(:id as uuid) and d.status = 'published'
                     group by d.published_post_id, d.title, d.body, d.persona_id
                     """
-                ),
-                {"id": source_draft_id},
-            ).mappings().first()
+                ), {"id": source_draft_id}).mappings().first()
+            else:
+                post = connection.execute(text(
+                    """
+                    select po.id, po.title, coalesce(po.body_html, '') as body,
+                           null::uuid as persona_id,
+                           coalesce(po.view_count, 0) as views,
+                           coalesce(po.vote_count, 0) as likes,
+                           count(c.id) filter (where c.deleted_at is null) as comments
+                    from posts po
+                    join profiles author_profile
+                      on author_profile.id = po.author_id and author_profile.is_ai is false
+                    left join comments c on c.post_id = po.id
+                    where po.id = cast(:id as uuid) and po.status = 'published'
+                    group by po.id, po.title, po.body_html, po.view_count, po.vote_count
+                    """
+                ), {"id": post_id}).mappings().first()
             if post is None:
                 return 0
             if connection.execute(
-                text("select 1 from ai_engagement_plans where source_draft_id = cast(:id as uuid)"),
-                {"id": source_draft_id},
+                text("select 1 from ai_engagement_plans where post_id = :id"),
+                {"id": post["id"]},
             ).first():
                 return 0
             personas = connection.execute(
@@ -947,7 +1190,8 @@ class PublicationService:
                     select p.id, p.profile_id, p.display_name, p.role, p.tone, p.system_prompt, p.interests
                     from ai_personas p
                     join profiles pr on pr.id = p.profile_id and pr.is_ai
-                    where p.enabled and p.profile_id is not null and p.id <> :author_persona_id
+                    where p.enabled and p.profile_id is not null
+                      and (:author_persona_id is null or p.id <> :author_persona_id)
                     order by p.last_used_at nulls first, p.created_at
                     """
                 ),
@@ -968,12 +1212,13 @@ class PublicationService:
             starts_at = datetime.now(timezone.utc) + timedelta(minutes=self.settings.comment_min_delay_minutes)
             duration_hours = 6 + round(score * 42)
             ends_at = starts_at + timedelta(hours=duration_hours)
-            heat_personas = [
-                persona for persona in personas
-                if self._persona_action_probability(dict(persona), "post_heat", str(post["id"]))[1]
-            ]
+            heat_personas = self._select_heat_personas([dict(persona) for persona in personas], str(post["id"]))
             rng.shuffle(heat_personas)
-            target_heats = min(len(heat_personas), round(score * len(heat_personas)))
+            # The persona probability above is the HEAT decision. Do not scale the
+            # selected personas by source popularity again: newly published posts
+            # commonly have a zero metric score, which used to erase every HEAT
+            # decision and create plans with target_post_heats = 0.
+            target_heats = min(50, len(heat_personas))
             plan_id = str(uuid.uuid4())
             connection.execute(
                 text(
@@ -1000,7 +1245,7 @@ class PublicationService:
                     "target_likes": target_comment_likes,
                     "starts_at": starts_at,
                     "ends_at": ends_at,
-                    "rationale": json.dumps({"views": int(post["views"]), "likes": int(post["likes"]), "comments": int(post["comments"]), "duration_hours": duration_hours, "comment_min": minimum_comments, "comment_max": maximum_comments}),
+                    "rationale": json.dumps({"views": int(post["views"]), "likes": int(post["likes"]), "comments": int(post["comments"]), "duration_hours": duration_hours, "comment_min": minimum_comments, "comment_max": maximum_comments, "plan_source": "ai_draft" if source_draft_id else "member_post", "heat_policy": "persona_probability_v2_floor_5", "heat_eligible_personas": len(personas), "heat_selected_personas": target_heats}),
                 },
             )
             actions = self._build_comment_actions(

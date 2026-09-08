@@ -25,6 +25,24 @@ import {
 const formatDate = value => value ? new Date(value).toLocaleString('ko-KR', { dateStyle: 'medium', timeStyle: 'short' }) : '-'
 const safeLower = value => String(value || '').toLocaleLowerCase('ko-KR')
 const parseLines = value => String(value || '').split('\n').map(item => item.trim()).filter(Boolean)
+const youtubeVideoId = value => {
+  try {
+    const url = new URL(String(value || '').trim())
+    const host = url.hostname.toLowerCase().replace(/^www\./, '')
+    if (host === 'youtu.be') return url.pathname.split('/').filter(Boolean)[0] || ''
+    if (!['youtube.com', 'm.youtube.com', 'music.youtube.com', 'youtube-nocookie.com'].includes(host)) return ''
+    if (url.pathname === '/watch') return url.searchParams.get('v') || ''
+    const parts = url.pathname.split('/').filter(Boolean)
+    return ['embed', 'shorts', 'live'].includes(parts[0]) ? parts[1] || '' : ''
+  } catch { return '' }
+}
+const adminPostThumbnail = post => {
+  const stored = [...(post.post_images || [])].sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))[0]?.image_url
+  if (stored) return stored
+  const links = [post.reference_url, post.source_url, ...(post.source_links || []).map(link => link?.url)]
+  const videoId = links.map(youtubeVideoId).find(Boolean)
+  return videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : ''
+}
 const galleryDecisionLabels = { photo_candidate: '활동 사진 후보', review: 'AI 확인 보류', exclude: 'AI 제외 권고' }
 const galleryReviewLabels = { pending: '확인 필요', approved: '승인됨', rejected: '제외됨' }
 
@@ -352,7 +370,7 @@ export function PostsPanel({ rows, artists, onReload }) {
       await onReload(`선택한 포스트 ${deleted.length}개를 삭제했습니다.`)
     } finally { setDeleting(false) }
   }
-  return <><div className="admin-search admin-section-search"><input value={query} onChange={event => setQuery(event.target.value)} placeholder="제목, 본문 요약, 작성자, 태그 검색" aria-label="포스트 검색" />{query && <button type="button" onClick={() => setQuery('')}>지우기</button>}<span>{visible.length}건</span></div><div className="admin-member-selection admin-post-selection"><label><input type="checkbox" checked={allVisibleSelected} disabled={!visible.length || deleting} onChange={toggleAllVisible} /> 현재 목록 전체 선택</label><span>{selectedCount}개 선택</span><button type="button" disabled={!selectedCount || deleting} onClick={removeSelected}>{deleting ? '삭제 중…' : '선택 삭제'}</button></div><section className="admin-panel admin-table-wrap"><table><thead><tr><th className="admin-post-check-column"><span className="sr-only">선택</span></th><th>제목 / 작성자</th><th>등록일</th><th>조회</th><th>HEAT</th><th>댓글</th><th>상태</th><th></th></tr></thead><tbody>{visible.map(post => { const thumbnail = [...(post.post_images || [])].sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0))[0]?.image_url; return <tr className={selectedIds.has(post.id) ? 'selected' : ''} key={post.id}><td className="admin-post-check-column"><input type="checkbox" checked={selectedIds.has(post.id)} disabled={deleting} onChange={() => toggle(post.id)} aria-label={`${post.title} 선택`} /></td><td><div className="admin-post-list-title">{thumbnail ? <img src={thumbnail} alt="" loading="lazy" /> : <span className="admin-post-list-placeholder" aria-hidden="true">이미지 없음</span>}<span><strong>{post.title}</strong><small>@{post.author_display_name}</small></span></div></td><td>{formatDate(post.created_at)}</td><td>{Number(post.view_count).toLocaleString()}</td><td>{Number(post.vote_count).toLocaleString()}</td><td>{post.comments?.[0]?.count || 0}</td><td><span className={`admin-status ${post.status}`}>{post.status}</span></td><td><button type="button" className="admin-row-action" onClick={() => open(post)}>상세 관리</button></td></tr>})}</tbody></table></section>{selected && <PostDetail initial={selected} artists={artists} onClose={() => setSelected(null)} onChanged={() => onReload()} />}</>
+  return <><div className="admin-search admin-section-search"><input value={query} onChange={event => setQuery(event.target.value)} placeholder="제목, 본문 요약, 작성자, 태그 검색" aria-label="포스트 검색" />{query && <button type="button" onClick={() => setQuery('')}>지우기</button>}<span>{visible.length}건</span></div><div className="admin-member-selection admin-post-selection"><label><input type="checkbox" checked={allVisibleSelected} disabled={!visible.length || deleting} onChange={toggleAllVisible} /> 현재 목록 전체 선택</label><span>{selectedCount}개 선택</span><button type="button" disabled={!selectedCount || deleting} onClick={removeSelected}>{deleting ? '삭제 중…' : '선택 삭제'}</button></div><section className="admin-panel admin-table-wrap"><table><thead><tr><th className="admin-post-check-column"><span className="sr-only">선택</span></th><th>제목 / 작성자</th><th>작성 구분</th><th>등록일</th><th>조회</th><th>HEAT</th><th>댓글</th><th>상태</th><th></th></tr></thead><tbody>{visible.map(post => { const thumbnail = adminPostThumbnail(post); return <tr className={selectedIds.has(post.id) ? 'selected' : ''} key={post.id}><td className="admin-post-check-column"><input type="checkbox" checked={selectedIds.has(post.id)} disabled={deleting} onChange={() => toggle(post.id)} aria-label={`${post.title} 선택`} /></td><td><div className="admin-post-list-title">{thumbnail ? <img src={thumbnail} alt="" loading="lazy" referrerPolicy="no-referrer" /> : <span className="admin-post-list-placeholder" aria-hidden="true">이미지 없음</span>}<span><strong>{post.title}</strong><small>@{post.author_display_name}</small></span></div></td><td><span className={`admin-post-author-type ${post.author_is_ai ? 'ai' : 'human'}`}>{post.author_is_ai ? 'AI 자동 작성' : '사용자 작성'}</span></td><td>{formatDate(post.created_at)}</td><td>{Number(post.view_count).toLocaleString()}</td><td>{Number(post.vote_count).toLocaleString()}</td><td>{post.comments?.[0]?.count || 0}</td><td><span className={`admin-status ${post.status}`}>{post.status}</span></td><td><button type="button" className="admin-row-action" onClick={() => open(post)}>상세 관리</button></td></tr>})}</tbody></table></section>{selected && <PostDetail initial={selected} artists={artists} onClose={() => setSelected(null)} onChanged={() => onReload()} />}</>
 }
 
 export function CommentsPanel({ rows, onReload }) {

@@ -106,6 +106,7 @@
   .mobile-vote-sheet .brand-tile{height:174px;min-height:174px;flex:0 0 174px;padding:16px 20px;gap:8px;overflow:hidden;background:radial-gradient(circle at 85% 8%,#9a70ef66 0 13%,transparent 38%),linear-gradient(135deg,#1e1629,#38224f 55%,#6246a5)}
   .mobile-vote-sheet .brand-tile::after{content:"";width:170px;height:170px;position:absolute;right:-73px;bottom:-104px;border:1px solid #ffffff29;border-radius:50%;box-shadow:0 0 0 23px #ffffff0a,0 0 0 46px #ffffff08}
   .mobile-vote-sheet .back-button{display:none}.mobile-vote-sheet .brand-tile>img{width:76px;max-width:76px;height:58px;display:block;object-fit:contain;filter:drop-shadow(0 4px 12px #0005)}
+  .mobile-vote-sheet .brand-tagline{display:none}
   .mobile-vote-intro{display:flex;align-items:center;flex-direction:column;gap:3px;color:#fff;text-align:center}.mobile-vote-intro small{color:#cdbfff;font-size:12px;font-weight:800;letter-spacing:1px}.mobile-vote-intro strong{font-size:14px;font-weight:650;line-height:1.35}
   .mobile-vote-sheet .vote-button{min-width:188px;min-height:44px;padding:0 22px;position:relative;z-index:1;border:1px solid #ffffff30;border-radius:23px;background:linear-gradient(100deg,#7656e8,#a66de9);color:#fff;font-size:14px;font-weight:800;box-shadow:0 10px 24px #14082366,inset 0 1px 0 #ffffff35}
   .mobile-vote-sheet .vote-button:active{transform:translateY(1px)}
